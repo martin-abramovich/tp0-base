@@ -3,3 +3,6 @@
 
 # Executables
 bin/
+
+# Carpeta venv
+venv/
