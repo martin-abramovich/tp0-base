@@ -1,6 +1,6 @@
 #!/bin/bash
 
-RESULT=$(echo "hola" | docker run --rm --network tp0_testing_net busybox nc server 12345)
+RESULT=$(docker run --rm --network tp0_testing_net busybox /bin/sh -c 'echo "hola" | nc server 12345')
 
 if [ "$RESULT" = "hola" ]; then
     echo "action: test_echo_server | result: success"
