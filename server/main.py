@@ -4,7 +4,7 @@ from configparser import ConfigParser
 from common.server import Server
 import logging
 import os
-
+import signal
 
 def initialize_config():
     """ Parse env variables or config file to find program config params
@@ -49,6 +49,7 @@ def main():
 
     # Initialize server and start server loop
     server = Server(port, listen_backlog)
+    signal.signal(signal.SIGTERM, server.__handle_sigterm)
     server.run()
 
 def initialize_log(logging_level):

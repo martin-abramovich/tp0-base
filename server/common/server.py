@@ -21,7 +21,6 @@ class Server:
 
         # TODO: Modify this program to handle signal to graceful shutdown
         # the server
-        signal.signal(signal.SIGTERM, self.__signal_handler)
 
         while self._running:
             try:
@@ -30,16 +29,16 @@ class Server:
                 break
             self.__handle_client_connection(client_sock)
         
-        self._graceful_shutdown()
+        self.shutdown()
 
-    def __signal_handler(self, signum, frame):
+    def __handle_sigterm(self, signum, frame):
         """
         Handle signal to graceful shutdown the server
         """
         logging.info('action: signal_handler | result: in_progress')
         self._running = False
 
-    def _graceful_shutdown(self):
+    def shutdown(self):
         logging.info('action: shutdown | result: in_progress')
 
         for client_sock in self._client_sockets:
