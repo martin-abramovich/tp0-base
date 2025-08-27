@@ -28,27 +28,15 @@ class Server:
             except OSError:
                 break
             self.__handle_client_connection(client_sock)
-        
-        self.shutdown()
 
     def handle_sigterm(self, signum, frame):
         """
         Handle signal to graceful shutdown the server
         """
-        logging.info('action: signal_handler | result: in_progress')
-        self._running = False
-
-    def shutdown(self):
         logging.info('action: shutdown | result: in_progress')
-
-        for client_sock in self._client_sockets:
-            client_sock.close()
-            logging.info(f'closed client socket: {client_sock}')
-
-        logging.info('action: shutdown | result: in_progress | closing server socket')
         self._server_socket.close()
-        logging.info('action: shutdown | result: success | all resources closed')
-
+        self._running = False
+        logging.info('action: shutdown | result: success')
 
     def __handle_client_connection(self, client_sock):
         """
