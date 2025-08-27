@@ -31,7 +31,7 @@ class Server:
         
         self.shutdown()
 
-    def __handle_sigterm(self, signum, frame):
+    def handle_sigterm(self, signum, frame):
         """
         Handle signal to graceful shutdown the server
         """
