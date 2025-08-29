@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -18,8 +19,33 @@ func writeAll(conn net.Conn, data []byte) error {
 	return nil
 }
 
+func readAll(conn net.Conn, buf []byte) error {
+	totalRead := 0
+	for totalRead < len(buf) {
+		n, err := conn.Read(buf[totalRead:])
+		if err != nil {
+			if err == io.EOF && totalRead > 0 {
+				return fmt.Errorf("unexpected EOF, read %d bytes of %d", totalRead, len(buf))
+			}
+			return err
+		}
+		totalRead += n
+	}
+	return nil
+}
+
+func receiveAck(conn net.Conn) (int, error) {
+	buf := make([]byte, 4)
+	if err := readAll(conn, buf); err != nil {
+		return 0, fmt.Errorf("error reading ACK: %w", err)
+	}
+
+	ackNumber := int(binary.BigEndian.Uint32(buf))
+	return ackNumber, nil
+}
+
 func sendBet(conn net.Conn, bet Bet) error {
-	payload := fmt.Sprintf("%d,%s,%s,%s,%s,%d",
+	payload := fmt.Sprintf("%s,%s,%s,%s,%s,%s",
 		bet.Agencia,
 		bet.Nombre,
 		bet.Apellido,

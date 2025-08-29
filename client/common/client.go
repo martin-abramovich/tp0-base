@@ -1,10 +1,9 @@
 package common
 
 import (
-	"bufio"
-	"fmt"
 	"net"
 	"time"
+	"strconv"
 
 	"github.com/op/go-logging"
 )
@@ -65,38 +64,32 @@ func (c *Client) StartClientLoop() {
 			return
 		default:
 			c.createClientSocket()
-
-			payload := SerializeBet(c.bet) + "\n"
-			err := writeAll(c.conn, []byte(payload))
-			if err != nil {
-				log.Errorf("action: send_message | result: fail | client_id: %v | error: %v",
-					c.config.ID,
-					err,
-				)
-				c.conn.Close()
-				return
-			}
-
-			log.Infof("action: send_message | result: success | client_id: %v | msg: %v",
-				c.config.ID,
-				payload,
-			)
-
-			msg, err := bufio.NewReader(c.conn).ReadString('\n')
-			c.conn.Close()
 			
-			if err != nil {
-				log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+			if err := sendBet(c.conn, c.bet); err != nil {
+				log.Errorf("action: send_bet | result: fail | client_id: %v | error: %v",
 					c.config.ID,
 					err,
 				)
 				return
 			}
 
-			log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-				c.config.ID,
-				msg,
-			)
+			ack, err := receiveAck(c.conn)
+			if err != nil {
+				log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
+					c.config.ID,
+					err,
+				)
+				return
+			}
+
+			n, err := strconv.Atoi(c.bet.Numero)
+			if ack == n {
+				log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", c.bet.Documento, c.bet.Numero)
+			} else {
+				log.Errorf("action: apuesta_enviada | result: fail | dni: %s | numero: %s", c.bet.Documento, c.bet.Numero)
+			}
+
+			c.conn.Close()
 
 			// Wait a time between sending one message and the next one
 			select {
@@ -112,7 +105,6 @@ func (c *Client) StartClientLoop() {
 }
 
 // StopClientLoop Stops the client loop
-
 func (c *Client) StopClientLoop() {
 	close(c.stop)
 	log.Infof("action: stop_client_loop | result: success | client_id: %v", c.config.ID)
