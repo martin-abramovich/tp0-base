@@ -24,14 +24,16 @@ type Client struct {
 	config ClientConfig
 	conn   net.Conn
 	stop   chan struct{}
+	bet    Bet
 }
 
 // NewClient Initializes a new client receiving the configuration
 // as a parameter
-func NewClient(config ClientConfig) *Client {
+func NewClient(config ClientConfig, bet Bet) *Client {
 	client := &Client{
 		config: config,
 		stop:   make(chan struct{}),
+		bet:    bet,
 	}
 	return client
 }
@@ -64,16 +66,25 @@ func (c *Client) StartClientLoop() {
 		default:
 			c.createClientSocket()
 
-			// TODO: Modify the send to avoid short-write
-			fmt.Fprintf(
-				c.conn,
-				"[CLIENT %v] Message N°%v\n",
+			payload := SerializeBet(c.bet) + "\n"
+			err := writeAll(c.conn, []byte(payload))
+			if err != nil {
+				log.Errorf("action: send_message | result: fail | client_id: %v | error: %v",
+					c.config.ID,
+					err,
+				)
+				c.conn.Close()
+				return
+			}
+
+			log.Infof("action: send_message | result: success | client_id: %v | msg: %v",
 				c.config.ID,
-				msgID,
+				payload,
 			)
+
 			msg, err := bufio.NewReader(c.conn).ReadString('\n')
 			c.conn.Close()
-
+			
 			if err != nil {
 				log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
 					c.config.ID,
