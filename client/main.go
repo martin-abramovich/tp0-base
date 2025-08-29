@@ -95,13 +95,6 @@ func PrintConfig(v *viper.Viper) {
 		v.GetDuration("loop.period"),
 		v.GetString("log.level"),
 	)
-	bet := common.Bet{
-		Nombre: v.GetString("bet.nombre"),
-		Apellido: v.GetString("bet.apellido"),
-		Documento: v.GetString("bet.documento"),
-		Nacimiento: v.GetString("bet.nacimiento"),
-		Numero: v.GetString("bet.numero"),
-	}
 }
 
 func main() {
@@ -122,6 +115,14 @@ func main() {
 		ID:            v.GetString("id"),
 		LoopAmount:    v.GetInt("loop.amount"),
 		LoopPeriod:    v.GetDuration("loop.period"),
+	}
+
+	bet := common.Bet{
+		Nombre: v.GetString("bet.nombre"),
+		Apellido: v.GetString("bet.apellido"),
+		Documento: v.GetString("bet.documento"),
+		Nacimiento: v.GetString("bet.nacimiento"),
+		Numero: v.GetString("bet.numero"),
 	}
 
 	client := common.NewClient(clientConfig, bet)
