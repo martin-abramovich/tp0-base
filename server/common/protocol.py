@@ -43,10 +43,10 @@ def read_bet(sock: socket.socket) -> Bet:
         raise ValueError(f"Expected 6 fields, got {len(fields)}")
 
     return Bet(
-        agency=fields[0],
+        agency=int(fields[0]),
         first_name=fields[1],
         last_name=fields[2],
         document=fields[3],
         birthdate=fields[4],
-        number=fields[5]
+        number=int(fields[5])
     )
