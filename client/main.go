@@ -39,6 +39,11 @@ func InitConfig() (*viper.Viper, error) {
 	v.BindEnv("loop", "period")
 	v.BindEnv("loop", "amount")
 	v.BindEnv("log", "level")
+	v.BindEnv("bet.nombre")
+	v.BindEnv("bet.apellido")
+	v.BindEnv("bet.documento")
+	v.BindEnv("bet.nacimiento")
+	v.BindEnv("bet.numero")
 
 	// Try to read configuration from config file. If config file
 	// does not exists then ReadInConfig will fail but configuration
@@ -90,6 +95,13 @@ func PrintConfig(v *viper.Viper) {
 		v.GetDuration("loop.period"),
 		v.GetString("log.level"),
 	)
+	bet := common.Bet{
+		Nombre: v.GetString("bet.nombre"),
+		Apellido: v.GetString("bet.apellido"),
+		Documento: v.GetString("bet.documento"),
+		Nacimiento: v.GetString("bet.nacimiento"),
+		Numero: v.GetString("bet.numero"),
+	}
 }
 
 func main() {
@@ -112,7 +124,7 @@ func main() {
 		LoopPeriod:    v.GetDuration("loop.period"),
 	}
 
-	client := common.NewClient(clientConfig)
+	client := common.NewClient(clientConfig, bet)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM)
