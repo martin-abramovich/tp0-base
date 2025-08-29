@@ -1,7 +1,7 @@
 import socket
 import logging
 
-from server.common.utils import store_bets
+from common.utils import store_bets
 from .protocol import read_bet, send_ack
 
 class Server:
