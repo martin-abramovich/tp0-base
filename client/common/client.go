@@ -16,6 +16,7 @@ type ClientConfig struct {
 	ServerAddress string
 	LoopAmount    int
 	LoopPeriod    time.Duration
+	BatchMaxAmount   int
 }
 
 // Client Entity that encapsulates how
@@ -24,6 +25,49 @@ type Client struct {
 	conn   net.Conn
 	stop   chan struct{}
 	bet    Bet
+}
+
+func readBetsFromFile(filename string, agencyID string) ([]Bet, error) {
+	csvFile, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("error opening file: %v", err)
+	}
+	defer csvFile.Close()
+
+	var bets []Bet
+	scanner := bufio.NewScanner(csvFile)
+
+	for scanner.Scan() {
+        line := scanner.Text()
+        if bet, err := parseBetLine(line, agencyID); err == nil {
+            bets = append(bets, bet)
+        } else {
+            log.Warningf("Error parsing line '%s': %v", line, err)
+        }
+    }
+    
+    return bets, nil
+}
+
+func parseBetLine(line string, agencyID int) (Bet, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return Bet{}, fmt.Errorf("empty line")
+	}
+	
+	fields := strings.Split(line, ",")
+	if len(fields) != 5 {
+		return Bet{}, fmt.Errorf("expected 5 fields, got %d", len(fields))
+	}
+
+	return Bet{
+		Agencia: agencyID,
+		Nombre: fields[0],
+		Apellido: fields[1],
+		Documento: fields[2],
+		Nacimiento: fields[3],
+		Numero: fields[4],
+	}, nil
 }
 
 // NewClient Initializes a new client receiving the configuration

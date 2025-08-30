@@ -71,3 +71,36 @@ func sendBet(conn net.Conn, bet Bet) error {
 
 	return nil
 }
+
+
+func sendBetBatch(conn net.Conn, bets []Bet) error {
+	var payloads []string
+	for _, bet := range bets {
+		betPayload := fmt.Sprintf("%s,%s,%s,%s,%s,%s",
+			bet.Agencia,
+			bet.Nombre,
+			bet.Apellido,
+			bet.Documento,
+			bet.Nacimiento,
+			bet.Numero,
+		)
+		payloads = append(payloads, betPayload)
+	}
+
+	payload := strings.Join(payloads, "\n")
+	data := []byte(payload)
+	
+	length := uint16(len(data))
+	header := make([]byte, 2)
+	binary.BigEndian.PutUint16(header, length)
+
+	if err := writeAll(conn, header); err != nil {
+		return fmt.Errorf("error sending header: %v", err)
+	}
+
+	if err := writeAll(conn, data); err != nil {
+		return fmt.Errorf("error sending payload: %v", err)
+	}
+
+	return nil
+}
