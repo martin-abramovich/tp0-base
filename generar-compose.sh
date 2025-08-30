@@ -38,6 +38,7 @@ cat >> "$OUTPUT_FILE" <<EOF
       - server
     volumes:
       - ./client/config.yaml:/config.yaml
+      - ./.data/agency-$i.csv:/agency-$i.csv
 EOF
 done
 
