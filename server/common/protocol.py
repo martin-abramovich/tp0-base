@@ -19,9 +19,11 @@ def _read_bytes(sock: socket.socket, n: int) -> bytes:
 
 def send_ack(sock, bet: Bet):
     if bet is None:
-        ack = struct.pack('>I', -1)
+        # Usar 0xFFFFFFFF (uint32) como código de error
+        ack_value = 0xFFFFFFFF
     else:
-        ack = struct.pack('>I', bet.number)
+        ack_value = bet.number
+    ack = struct.pack('>I', ack_value)
     _send_all(sock, ack)
 
 def _send_all(sock, data: bytes):

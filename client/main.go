@@ -113,16 +113,7 @@ func main() {
 		BatchMaxAmount: v.GetInt("batch.maxAmount"),
 	}
 
-	bet := common.Bet{
-		Agencia: v.GetString("id"),
-		Nombre: v.GetString("bet.nombre"),
-		Apellido: v.GetString("bet.apellido"),
-		Documento: v.GetString("bet.documento"),
-		Nacimiento: v.GetString("bet.nacimiento"),
-		Numero: v.GetString("bet.numero"),
-	}
-
-	client := common.NewClient(clientConfig, bet)
+	client := common.NewClient(clientConfig)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM)

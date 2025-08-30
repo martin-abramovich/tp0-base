@@ -48,25 +48,30 @@ class Server:
         client socket will also be closed
         """
         try:
-            bets = read_bet_batch(client_sock)
-
-            success = True
-
-            for bet in bets:
+            while True:
                 try:
-                    store_bets([bet])
-                    logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
-                except Exception as e:
-                    logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
-                    success = False
+                    bets = read_bet_batch(client_sock)
+                except ConnectionError:
+                    # Client closed connection
                     break
 
-            if success:
-                logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
-                send_ack(client_sock, bets[-1])
-            else:
-                logging.info(f'action: apuesta_recibida | result: fail | cantidad: {len(bets)}')
-                send_ack(client_sock, None)
+                success = True
+
+                for bet in bets:
+                    try:
+                        store_bets([bet])
+                        logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+                    except Exception as e:
+                        logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
+                        success = False
+                        break
+
+                if success:
+                    logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
+                    send_ack(client_sock, bets[-1])
+                else:
+                    logging.info(f'action: apuesta_recibida | result: fail | cantidad: {len(bets)}')
+                    send_ack(client_sock, None)
 
         except OSError as e:
             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
