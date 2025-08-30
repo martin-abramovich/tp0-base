@@ -29,7 +29,7 @@ def _send_all(sock, data: bytes):
             raise ConnectionError("Socket closed")
         total_sent += sent
 
-def read_bet(sock: socket.socket) -> Bet:
+def read_bet_batch(sock: socket.socket) -> list[Bet]:
     header = _read_bytes(sock, 2)
     if not header:
         raise EOFError("Socket closed")
@@ -38,15 +38,21 @@ def read_bet(sock: socket.socket) -> Bet:
     data = _read_bytes(sock, length)
     text = data.decode("utf-8")
 
-    fields = text.strip().split(",")
-    if len(fields) != 6:
-        raise ValueError(f"Expected 6 fields, got {len(fields)}")
+    bet_strings = text.strip().split("\n")
+    bets = []
+    for bet_string in bet_strings:
+        fields = bet_string.strip().split(",")
+        if len(fields) != 6:
+            raise ValueError(f"Expected 6 fields, got {len(fields)}")
+        bets.append(Bet(
+            agency=int(fields[0]),
+            first_name=fields[1],
+            last_name=fields[2],
+            document=fields[3],
+            birthdate=fields[4],
+            number=int(fields[5])
+        ))
+    return bets
 
-    return Bet(
-        agency=int(fields[0]),
-        first_name=fields[1],
-        last_name=fields[2],
-        document=fields[3],
-        birthdate=fields[4],
-        number=int(fields[5])
-    )
+
+

@@ -4,6 +4,10 @@ import (
 	"net"
 	"time"
 	"strconv"
+	"os"
+	"bufio"
+	"fmt"
+	"strings"
 
 	"github.com/op/go-logging"
 )
@@ -109,28 +113,42 @@ func (c *Client) StartClientLoop() {
 		default:
 			c.createClientSocket()
 			
-			if err := sendBet(c.conn, c.bet); err != nil {
-				log.Errorf("action: send_bet | result: fail | client_id: %v | error: %v",
-					c.config.ID,
-					err,
-				)
-				return
-			}
+			for i := 0; i < len(bets); i += c.config.BatchMaxAmount {
+				end := i + c.config.BatchMaxAmount
+				if end > len(bets) {
+					end = len(bets)
+				}
+				batch := bets[i:end]
+				if err := sendBetBatch(c.conn, batch); err != nil {
+					log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
+						c.config.ID,
+						err,
+					)
+					return
+				}
 
-			ack, err := receiveAck(c.conn)
-			if err != nil {
-				log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
-					c.config.ID,
-					err,
-				)
-				return
-			}
+				ack, err := receiveAck(c.conn)
+				last = batch[len(batch)-1]
+				if err != nil {
+					if err == io.EOF && end == len(bets) {
+						log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+						return
+					}
+					log.Errorf("action: apuestas_enviadas | result: fail | client_id: %v | error: %v",
+						c.config.ID,
+						err,
+					)
+					return
+				}
 
-			n, err := strconv.Atoi(c.bet.Numero)
-			if ack == n {
 				log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", c.bet.Documento, c.bet.Numero)
-			} else {
-				log.Errorf("action: apuesta_enviada | result: fail | dni: %s | numero: %s", c.bet.Documento, c.bet.Numero)
+
+				n, err := strconv.Atoi(last.Numero)
+				if ack == n {
+					log.Infof("action: apuestas_enviadas | result: success")
+				} else {
+					log.Errorf("action: apuestas_enviadas | result: fail")
+				}
 			}
 
 			c.conn.Close()
