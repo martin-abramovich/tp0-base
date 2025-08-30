@@ -88,7 +88,7 @@ func sendBetBatch(conn net.Conn, bets []Bet) error {
 		payloads = append(payloads, betPayload)
 	}
 
-	payload := strings.Join(payloads, "\n")
+	payload := strings.Join(payloads, ";")
 	data := []byte(payload)
 	
 	length := uint16(len(data))

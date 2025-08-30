@@ -18,7 +18,10 @@ def _read_bytes(sock: socket.socket, n: int) -> bytes:
     return buf
 
 def send_ack(sock, bet: Bet):
-    ack = struct.pack('>I', bet.number)
+    if bet is None:
+        ack = struct.pack('>I', -1)
+    else:
+        ack = struct.pack('>I', bet.number)
     _send_all(sock, ack)
 
 def _send_all(sock, data: bytes):
@@ -38,7 +41,7 @@ def read_bet_batch(sock: socket.socket) -> list[Bet]:
     data = _read_bytes(sock, length)
     text = data.decode("utf-8")
 
-    bet_strings = text.strip().split("\n")
+    bet_strings = text.strip().split(";")
     bets = []
     for bet_string in bet_strings:
         fields = bet_string.strip().split(",")
