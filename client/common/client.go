@@ -222,6 +222,9 @@ func (c *Client) StartClientLoop() {
 		// Respuesta inesperada: reintentar
 		time.Sleep(500 * time.Millisecond)
 	}
+
+	// Log de finalización explícito para que los tests detecten el evento de salida
+	log.Infof("action: exit | result: success")
 }
 
 // StopClientLoop Stops the client loop
