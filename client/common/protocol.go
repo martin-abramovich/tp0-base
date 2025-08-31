@@ -45,6 +45,38 @@ func receiveAck(conn net.Conn) (int, error) {
 	return ackNumber, nil
 }
 
+func sendTextFrame(conn net.Conn, text string) error {
+    data := []byte(text)
+    if len(data) > 0xFFFF {
+        return fmt.Errorf("frame too large: %d", len(data))
+    }
+    header := make([]byte, 2)
+    binary.BigEndian.PutUint16(header, uint16(len(data)))
+    if err := writeAll(conn, header); err != nil {
+        return fmt.Errorf("error sending header: %v", err)
+    }
+    if err := writeAll(conn, data); err != nil {
+        return fmt.Errorf("error sending payload: %v", err)
+    }
+    return nil
+}
+
+func readTextFrame(conn net.Conn) (string, error) {
+    header := make([]byte, 2)
+    if err := readAll(conn, header); err != nil {
+        return "", err
+    }
+    length := binary.BigEndian.Uint16(header)
+    if length == 0 {
+        return "", nil
+    }
+    buf := make([]byte, length)
+    if err := readAll(conn, buf); err != nil {
+        return "", err
+    }
+    return string(buf), nil
+}
+
 func sendBet(conn net.Conn, bet Bet) error {
 	payload := fmt.Sprintf("%s,%s,%s,%s,%s,%s",
 		bet.Agencia,

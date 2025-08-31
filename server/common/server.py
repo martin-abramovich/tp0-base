@@ -1,8 +1,8 @@
 import socket
 import logging
 
-from common.utils import store_bets
-from .protocol import read_bet_batch, send_ack
+from common.utils import store_bets, load_bets, has_won
+from .protocol import read_bet_batch, send_ack, read_frame_text, parse_bet_batch_text, send_text_frame
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -11,6 +11,11 @@ class Server:
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
         self._running = True
+        # Estado del sorteo
+        self._finished_agencies: set[int] = set()
+        self._lottery_done: bool = False
+        # Para soportar cantidad variable de clientes, usamos el mayor ID visto (1..N)
+        self._max_agency_id_seen: int = 0
 
     def run(self):
         """
@@ -50,28 +55,85 @@ class Server:
         try:
             while True:
                 try:
-                    bets = read_bet_batch(client_sock)
+                    text = read_frame_text(client_sock)
                 except ConnectionError:
                     # Client closed connection
                     break
 
-                success = True
+                # Intentar parsear como batch de apuestas; si falla, es un comando
+                bets = None
+                try:
+                    bets = parse_bet_batch_text(text)
+                except Exception:
+                    bets = None
 
-                for bet in bets:
+                if bets is not None and len(bets) > 0:
+                    success = True
+
+                    for bet in bets:
+                        try:
+                            store_bets([bet])
+                            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+                            if bet.agency > self._max_agency_id_seen:
+                                self._max_agency_id_seen = bet.agency
+                        except Exception as e:
+                            logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
+                            success = False
+                            break
+
+                    if success:
+                        logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
+                        send_ack(client_sock, bets[-1])
+                    else:
+                        logging.info(f'action: apuesta_recibida | result: fail | cantidad: {len(bets)}')
+                        send_ack(client_sock, None)
+                    continue
+
+                # Comandos
+                if text.startswith('END|'):
                     try:
-                        store_bets([bet])
-                        logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+                        agency_id = int(text.split('|', 1)[1])
+                        if agency_id > self._max_agency_id_seen:
+                            self._max_agency_id_seen = agency_id
+                        self._finished_agencies.add(agency_id)
+                        if not self._lottery_done and self._max_agency_id_seen > 0 and len(self._finished_agencies) >= self._max_agency_id_seen:
+                            self._lottery_done = True
+                            logging.info('action: sorteo | result: success')
                     except Exception as e:
-                        logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
-                        success = False
-                        break
+                        logging.error(f"action: end_notify | result: fail | error: {e}")
+                    # No es necesario enviar respuesta para END
+                    continue
 
-                if success:
-                    logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
-                    send_ack(client_sock, bets[-1])
-                else:
-                    logging.info(f'action: apuesta_recibida | result: fail | cantidad: {len(bets)}')
-                    send_ack(client_sock, None)
+                if text.startswith('GET_WINNERS|'):
+                    try:
+                        agency_id = int(text.split('|', 1)[1])
+                        if agency_id > self._max_agency_id_seen:
+                            self._max_agency_id_seen = agency_id
+                    except Exception:
+                        send_text_frame(client_sock, 'NOT_READY')
+                        continue
+
+                    if not self._lottery_done:
+                        send_text_frame(client_sock, 'NOT_READY')
+                        continue
+
+                    # Calcular ganadores para la agencia
+                    winners: list[str] = []
+                    try:
+                        for bet in load_bets():
+                            if bet.agency == agency_id and has_won(bet):
+                                winners.append(bet.document)
+                    except Exception as e:
+                        logging.error(f"action: consulta_ganadores | result: fail | error: {e}")
+                        send_text_frame(client_sock, 'WINNERS|')
+                        continue
+
+                    payload = 'WINNERS|' + (','.join(winners))
+                    send_text_frame(client_sock, payload)
+                    continue
+
+                # Mensaje desconocido
+                logging.warning(f"action: mensaje_desconocido | result: fail | payload: {text}")
 
         except OSError as e:
             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")

@@ -34,15 +34,23 @@ def _send_all(sock, data: bytes):
             raise ConnectionError("Socket closed")
         total_sent += sent
 
-def read_bet_batch(sock: socket.socket) -> list[Bet]:
+def read_frame_text(sock: socket.socket) -> str:
+    """Lee una trama (2 bytes de longitud + payload UTF-8) y devuelve el texto."""
     header = _read_bytes(sock, 2)
     if not header:
         raise EOFError("Socket closed")
-    
     length = struct.unpack(">H", header)[0]
     data = _read_bytes(sock, length)
-    text = data.decode("utf-8")
+    return data.decode("utf-8")
 
+
+def send_text_frame(sock: socket.socket, text: str) -> None:
+    data = text.encode("utf-8")
+    header = struct.pack(">H", len(data))
+    _send_all(sock, header + data)
+
+
+def parse_bet_batch_text(text: str) -> list[Bet]:
     bet_strings = text.strip().split(";")
     bets = []
     for bet_string in bet_strings:
@@ -58,6 +66,12 @@ def read_bet_batch(sock: socket.socket) -> list[Bet]:
             number=int(fields[5])
         ))
     return bets
+
+
+def read_bet_batch(sock: socket.socket) -> list[Bet]:
+    """Compatibilidad hacia atrás: lee una trama y la parsea como batch de apuestas."""
+    text = read_frame_text(sock)
+    return parse_bet_batch_text(text)
 
 
 
