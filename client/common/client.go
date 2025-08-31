@@ -124,6 +124,7 @@ func (c *Client) StartClientLoop() {
 	}
 	defer c.conn.Close()
 
+	allBetsSent := true
 	for i := 0; i < len(bets); i += c.config.BatchMaxAmount {
 		end := i + c.config.BatchMaxAmount
 		if end > len(bets) {
@@ -136,20 +137,22 @@ func (c *Client) StartClientLoop() {
 				c.config.ID,
 				err,
 			)
-			return
+			allBetsSent = false
+			break
 		}
 
 		ack, err := receiveAck(c.conn)
 		last := batch[len(batch)-1]
 		if err != nil {
-			if end == len(bets) {
-				log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
-				break
-			}
 			log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
 				c.config.ID,
 				err,
 			)
+			// No marcar como error crítico si es el último batch
+			if end < len(bets) {
+				allBetsSent = false
+			}
+			// Continuar para intentar enviar FIN_APUESTAS de todas formas
 			continue
 		}
 
@@ -163,9 +166,25 @@ func (c *Client) StartClientLoop() {
 		}
 	}
 
+	// Siempre intentar enviar FIN_APUESTAS, incluso si hubo errores
+	if !allBetsSent {
+		log.Infof("action: some_bets_failed | client_id: %v | but_proceeding_with_notification", c.config.ID)
+	}
+
+	// Intentar enviar FIN_APUESTAS, reconectando si es necesario
 	if err := sendNotification(c.conn, c.config.ID); err != nil {
-		log.Errorf("action: fin_apuestas | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return
+		log.Infof("action: fin_apuestas | result: retry | client_id: %v | error: %v", c.config.ID, err)
+		// Intentar reconectar
+		c.conn.Close()
+		if err := c.createClientSocket(); err != nil {
+			log.Errorf("action: fin_apuestas | result: fail | client_id: %v | reconnect_error: %v", c.config.ID, err)
+			return
+		}
+		// Reintentar envío de notificación
+		if err := sendNotification(c.conn, c.config.ID); err != nil {
+			log.Errorf("action: fin_apuestas | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return
+		}
 	}
 
 	log.Infof("action: fin_apuestas | result: success | client_id: %v", c.config.ID)
