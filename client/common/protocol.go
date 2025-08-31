@@ -125,7 +125,7 @@ func sendNotification(conn net.Conn, agencyID string) error {
 	return nil
 }
 
-func requestWinners(conn net.Conn, agencyID string) ([]Winners, error) {
+func requestWinners(conn net.Conn, agencyID string) ([]string, error) {
 	const max_retries := 10
 	const retry_delay := 1 * time.Second
 
@@ -155,10 +155,13 @@ func requestWinners(conn net.Conn, agencyID string) ([]Winners, error) {
 			return nil, fmt.Errorf("error reading payload: %v", err)
 		}
 
-		resp = string(respData)
+		resp := string(respData)
 		if resp == "Sorteo no realizado" {
 			time.Sleep(retry_delay)
 			continue
+		}
+		if resp == "" {
+			return []string{}, nil
 		}
 		winners := strings.Split(resp, ",")
 		return winners, nil

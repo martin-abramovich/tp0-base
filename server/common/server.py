@@ -12,6 +12,7 @@ class Server:
         self._server_socket.listen(listen_backlog)
         self._running = True
         self.agencies_ended = set()
+        self.agencies_participated = set()
         self.winners_per_agency = {}
         self.lottery_held = False
 
@@ -84,10 +85,11 @@ class Server:
         return c
 
     def _handle_finish_bet(self, client_sock, raw_message):
-        agency_id = raw_message.split(":", 1)[1]
+        agency_id = int(raw_message.split(":", 1)[1])
         self.agencies_ended.add(agency_id)
         logging.info(f'action: fin_apuestas | agency_id: {agency_id} | result: success ')
-        if len(self.agencies_ended) == 5:
+        # Disparar sorteo cuando todas las agencias que participaron hayan terminado
+        if self.agencies_participated and self.agencies_participated.issubset(self.agencies_ended):
             self._draw_lottery()
 
     def _handle_bet_batch(self, client_sock, raw_message):
@@ -98,6 +100,8 @@ class Server:
             try:
                 store_bets([bet])
                 logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+                # Trackear agencias que participan
+                self.agencies_participated.add(bet.agency)
             except Exception as e:
                 logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
                 success = False
@@ -137,7 +141,7 @@ class Server:
             logging.info('action: pedir_ganadores | result: fail | error: sorteo no realizado')
             send_winners(client_sock, available=False, msg="Sorteo no realizado")
             return
-        agency_id = raw_message.split(":", 1)[1]
+        agency_id = int(raw_message.split(":", 1)[1])
         winners = self.winners_per_agency.get(agency_id, [])
         
         logging.info(f"action: consulta_ganadores | result: success | agency: {agency_id} | cant_ganadores: {len(winners)}")
