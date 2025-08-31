@@ -92,7 +92,7 @@ class Server:
                     try:
                         agency_id = int(text.split('|', 1)[1])
                         self._finished_agencies.add(agency_id)
-                        if not self._lottery_done and self.expected_agencies > 0 and len(self._finished_agencies) >= self.expected_agencies:
+                        if not self._lottery_done and self.expected_agencies == self._finished_agencies:
                             self._lottery_done = True
                             logging.info('action: sorteo | result: success')
                     except Exception as e:
