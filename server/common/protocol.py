@@ -34,15 +34,17 @@ def _send_all(sock, data: bytes):
             raise ConnectionError("Socket closed")
         total_sent += sent
 
-def read_bet_batch(sock: socket.socket) -> list[Bet]:
+def read_message(sock: socket.socket) -> str:
     header = _read_bytes(sock, 2)
     if not header:
         raise EOFError("Socket closed")
-    
+
     length = struct.unpack(">H", header)[0]
     data = _read_bytes(sock, length)
-    text = data.decode("utf-8")
+    return data.decode("utf-8")
 
+
+def read_bet_batch(text: str) -> list[Bet]:
     bet_strings = text.strip().split(";")
     bets = []
     for bet_string in bet_strings:
@@ -59,5 +61,20 @@ def read_bet_batch(sock: socket.socket) -> list[Bet]:
         ))
     return bets
 
+def send_winners(sock, available: bool, winners: list[str] = None, msg: str = ""):
+    """
+    Envía la lista de ganadores al cliente.
+    Si available==False, envía un mensaje de error (msg).
+    Si available==True, envía los DNIs separados por coma.
+    """
+    if available:
+        payload = ",".join(winners)
+    else:
+        payload = msg
 
+    data = payload.encode("utf-8")
+    length = len(data)
+    header = struct.pack(">H", length)
 
+    _send_all(sock, header)
+    _send_all(sock, data)
