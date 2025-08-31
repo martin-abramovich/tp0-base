@@ -46,27 +46,32 @@ class Server:
 
     def __handle_client_connection(self, client_sock):
         try:
-            try:
-                raw_message = read_message(client_sock)
-            except ConnectionError:
-                return
+            while True:
+                try:
+                    raw_message = read_message(client_sock)
+                except ConnectionError:
+                    # Cliente cerró
+                    break
 
-            if not raw_message:
-                return
+                if not raw_message:
+                    break
 
-            if raw_message.startswith("FIN_APUESTAS:"):
-                self._handle_finish_bet(client_sock, raw_message)
+                if raw_message.startswith("FIN_APUESTAS:"):
+                    self._handle_finish_bet(client_sock, raw_message)
 
-            elif raw_message.startswith("PEDIR_GANADORES:"):
-                self._handle_request_winners(client_sock, raw_message)
+                elif raw_message.startswith("PEDIR_GANADORES:"):
+                    self._handle_request_winners(client_sock, raw_message)
+                    # ahora sí: después de dar ganadores, cortar loop
+                    break  
 
-            else:
-                self._handle_bet_batch(client_sock, raw_message)
+                else:
+                    self._handle_bet_batch(client_sock, raw_message)
 
         except OSError as e:
             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
         finally:
             client_sock.close()
+
 
     def __accept_new_connection(self):
         """
