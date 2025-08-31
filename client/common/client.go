@@ -225,7 +225,7 @@ func (c *Client) StartClientLoop() {
 
 	// Pequeño delay para dar tiempo a que el agregador de logs entregue
 	// la línea de consulta antes de cortar por cantidad de 'exit'
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	// Log de finalización explícito para que los tests detecten el evento de salida
 	log.Infof("action: exit | result: success")
 }
