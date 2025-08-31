@@ -142,15 +142,15 @@ func (c *Client) StartClientLoop() {
 		ack, err := receiveAck(c.conn)
 		last := batch[len(batch)-1]
 		if err != nil {
-			if err == io.EOF && end == len(bets) {
+			if end == len(bets) {
 				log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
-				return
+				break
 			}
 			log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
 				c.config.ID,
 				err,
 			)
-			return
+			continue
 		}
 
 		log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", last.Documento, last.Numero)
@@ -177,6 +177,7 @@ func (c *Client) StartClientLoop() {
 	}
 
 	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", len(winners))
+	log.Infof("action: exit | result: success | client_id: %v", c.config.ID)
 }
 
 // StopClientLoop Stops the client loop
