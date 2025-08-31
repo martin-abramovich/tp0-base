@@ -28,11 +28,9 @@ class Server:
             try:
                 client_sock = self.__accept_new_connection()
                 self._active_connections.append(client_sock)
+                self.__handle_client_loop(client_sock)
             except OSError:
                 break
-            self.__handle_client_connection(client_sock)
-            if client_sock in self._active_connections:
-                self._active_connections.remove(client_sock)
 
     def handle_sigterm(self, signum, frame):
         logging.info("action: shutdown | result: in_progress")
@@ -56,25 +54,32 @@ class Server:
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         return c
 
-    def __handle_client_connection(self, client_sock):
+    def __handle_client_loop(self, client_sock):
+        """Maneja múltiples batches del mismo cliente hasta FIN_APUESTAS."""
         try:
-            raw_message = read_message(client_sock)
-            logging.info(f"action: message_received | result: success | message_length: {len(raw_message)}")
+            while True:
+                raw_message = read_message(client_sock)
+                logging.debug(f"action: message_received | message_length: {len(raw_message)}")
 
-            if not raw_message:
-                return
+                if not raw_message:
+                    break
 
-            if raw_message.startswith("FIN_APUESTAS:"):
-                self._handle_finish_bet(client_sock, raw_message)
-            elif raw_message.startswith("PEDIR_GANADORES:"):
-                self._handle_request_winners(client_sock, raw_message)
-            else:
-                self._handle_bet_batch(client_sock, raw_message)
+                if raw_message.startswith("FIN_APUESTAS:"):
+                    self._handle_finish_bet(client_sock, raw_message)
+                    break
+                elif raw_message.startswith("PEDIR_GANADORES:"):
+                    self._handle_request_winners(client_sock, raw_message)
+                else:
+                    self._handle_bet_batch(client_sock, raw_message)
 
+        except ConnectionError:
+            logging.info("action: client_disconnected | result: success")
         except Exception as e:
-            logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
+            logging.error(f"action: client_error | result: fail | error: {e}")
+        finally:
             try:
                 client_sock.close()
+                self._active_connections.remove(client_sock)
             except Exception:
                 pass
 
@@ -91,16 +96,10 @@ class Server:
                 success = False
                 break
 
-        # Enviar ACK y cerrar conexión
         try:
             send_ack(client_sock, bets[-1] if success else None)
         except Exception as e:
             logging.error(f"action: send_ack | result: fail | error: {e}")
-        finally:
-            try:
-                client_sock.close()
-            except Exception:
-                pass
 
         logging.info(f'action: apuesta_recibida | result: {"success" if success else "fail"} | cantidad: {len(bets)}')
 
@@ -108,17 +107,6 @@ class Server:
         agency_id = int(raw_message.split(":", 1)[1])
         self.agencies_ended.add(agency_id)
         logging.info(f'action: fin_apuestas | agency_id: {agency_id} | result: success')
-
-        # Enviar ACK para FIN_APUESTAS
-        try:
-            send_ack(client_sock, None)
-        except Exception as e:
-            logging.error(f"action: send_ack_fin_apuestas | result: fail | error: {e}")
-        finally:
-            try:
-                client_sock.close()
-            except Exception:
-                pass
 
         # Disparar sorteo si todas las agencias esperadas terminaron
         if len(self.agencies_ended) == self._expected_agencies:
@@ -144,17 +132,9 @@ class Server:
         if not self.lottery_held:
             logging.info('action: pedir_ganadores | result: fail | error: sorteo no realizado')
             send_winners(client_sock, available=False, msg="Sorteo no realizado")
-            try:
-                client_sock.close()
-            except Exception:
-                pass
             return
 
         agency_id = int(raw_message.split(":", 1)[1])
         winners = self.winners_per_agency.get(agency_id, [])
         logging.info(f"action: consulta_ganadores | result: success | agency: {agency_id} | cant_ganadores: {len(winners)}")
         send_winners(client_sock, available=True, winners=winners)
-        try:
-            client_sock.close()
-        except Exception:
-            pass
