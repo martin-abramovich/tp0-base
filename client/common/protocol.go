@@ -122,15 +122,25 @@ func sendNotification(conn net.Conn, agencyID string) error {
 		return fmt.Errorf("error sending payload: %v", err)
 	}
 
+	// Leer confirmación del servidor
+	lenbuf := make([]byte, 2)
+	if err := readAll(conn, lenbuf); err != nil {
+		return fmt.Errorf("error reading ack header: %v", err)
+	}
+	ackLength := binary.BigEndian.Uint16(lenbuf)
+	ackData := make([]byte, ackLength)
+	if err := readAll(conn, ackData); err != nil {
+		return fmt.Errorf("error reading ack payload: %v", err)
+	}
+
 	return nil
 }
 
 func requestWinners(conn net.Conn, agencyID string) ([]string, error) {
-	const max_retries := 10
-	const retry_delay := 1 * time.Second
+	const max_retries = 10
+	const retry_delay = 1 * time.Second
 
 	for i := 0; i < max_retries; i++ {
-
 		payload := []byte("PEDIR_GANADORES:" + agencyID)
 		length := uint16(len(payload))
 

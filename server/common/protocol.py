@@ -68,10 +68,22 @@ def send_winners(sock, available: bool, winners: list[str] = None, msg: str = ""
     Si available==True, envía los DNIs separados por coma.
     """
     if available:
-        payload = ",".join(winners)
+        payload = ",".join(winners) if winners else ""
     else:
         payload = msg
 
+    data = payload.encode("utf-8")
+    length = len(data)
+    header = struct.pack(">H", length)
+
+    _send_all(sock, header)
+    _send_all(sock, data)
+
+def send_notification_ack(sock):
+    """
+    Envía confirmación de notificación FIN_APUESTAS.
+    """
+    payload = "OK"
     data = payload.encode("utf-8")
     length = len(data)
     header = struct.pack(">H", length)

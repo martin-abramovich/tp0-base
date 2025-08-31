@@ -2,7 +2,7 @@ import socket
 import logging
 
 from common.utils import has_won, load_bets, store_bets
-from .protocol import read_message, send_ack, read_bet_batch, send_winners
+from .protocol import read_message, send_ack, read_bet_batch, send_winners, send_notification_ack
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -60,10 +60,8 @@ class Server:
                     self._handle_finish_bet(client_sock, raw_message)
 
                 elif raw_message.startswith("PEDIR_GANADORES:"):
-                    winners_sent = self._handle_request_winners(client_sock, raw_message)
-                    # Cerrar solo cuando efectivamente se enviaron ganadores
-                    if winners_sent:
-                        break  
+                    self._handle_request_winners(client_sock, raw_message)
+                    # No cerrar inmediatamente, permitir que el cliente procese la respuesta
 
                 else:
                     self._handle_bet_batch(client_sock, raw_message)
@@ -92,9 +90,14 @@ class Server:
         agency_id = int(raw_message.split(":", 1)[1])
         self.agencies_ended.add(agency_id)
         logging.info(f'action: fin_apuestas | agency_id: {agency_id} | result: success ')
+        
+        # Enviar confirmación al cliente
+        send_notification_ack(client_sock)
+        
         # Disparar sorteo cuando todas las agencias que participaron hayan terminado
         if self.agencies_participated and self.agencies_participated.issubset(self.agencies_ended):
-            self._draw_lottery()
+            if not self.lottery_held:  # Solo realizar sorteo si no se hizo antes
+                self._draw_lottery()
 
     def _handle_bet_batch(self, client_sock, raw_message):
         bets = read_bet_batch(raw_message)
@@ -124,6 +127,11 @@ class Server:
 
             bets = load_bets()
             
+            # Inicializar listas vacías para todas las agencias que participaron
+            for agency_id in self.agencies_participated:
+                if agency_id not in self.winners_per_agency:
+                    self.winners_per_agency[agency_id] = []
+            
             for bet in bets:
                 agency_id = bet.agency
 
@@ -144,11 +152,10 @@ class Server:
         if not self.lottery_held:
             logging.info('action: pedir_ganadores | result: fail | error: sorteo no realizado')
             send_winners(client_sock, available=False, msg="Sorteo no realizado")
-            return False
+            return
         agency_id = int(raw_message.split(":", 1)[1])
         winners = self.winners_per_agency.get(agency_id, [])
         
         logging.info(f"action: consulta_ganadores | result: success | agency: {agency_id} | cant_ganadores: {len(winners)}")
         send_winners(client_sock, available=True, winners=winners)
-        return True
 
