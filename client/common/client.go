@@ -216,7 +216,7 @@ func (c *Client) StartClientLoop() {
 					}
 				}
 			}
-			log.Infof("action: consulta_ganadores | result: success | source: client%s | cant_ganadores: %d", c.config.ID, cant)
+			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
 			break
 		}
 		// Respuesta inesperada: reintentar
