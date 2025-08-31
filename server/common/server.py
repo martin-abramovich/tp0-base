@@ -60,9 +60,10 @@ class Server:
                     self._handle_finish_bet(client_sock, raw_message)
 
                 elif raw_message.startswith("PEDIR_GANADORES:"):
-                    self._handle_request_winners(client_sock, raw_message)
-                    # ahora sí: después de dar ganadores, cortar loop
-                    break  
+                    winners_sent = self._handle_request_winners(client_sock, raw_message)
+                    # Cerrar solo cuando efectivamente se enviaron ganadores
+                    if winners_sent:
+                        break  
 
                 else:
                     self._handle_bet_batch(client_sock, raw_message)
@@ -143,10 +144,11 @@ class Server:
         if not self.lottery_held:
             logging.info('action: pedir_ganadores | result: fail | error: sorteo no realizado')
             send_winners(client_sock, available=False, msg="Sorteo no realizado")
-            return
+            return False
         agency_id = int(raw_message.split(":", 1)[1])
         winners = self.winners_per_agency.get(agency_id, [])
         
         logging.info(f"action: consulta_ganadores | result: success | agency: {agency_id} | cant_ganadores: {len(winners)}")
         send_winners(client_sock, available=True, winners=winners)
+        return True
 
