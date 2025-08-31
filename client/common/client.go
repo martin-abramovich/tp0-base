@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"io"
+	"encoding/binary"
+	
 
 	"github.com/op/go-logging"
 )
