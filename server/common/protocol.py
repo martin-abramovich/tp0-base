@@ -3,12 +3,6 @@ import struct
 from .utils import Bet
 
 def _read_bytes(sock: socket.socket, n: int) -> bytes:
-    """
-    Lee un número específico de bytes del socket.
-    Si el socket está cerrado, lanza un EOFError.
-    Si no se puede leer el número de bytes especificado, lanza un ValueError.
-    Si se lee correctamente, devuelve los bytes leídos.
-    """
     buf = b""
     while len(buf) < n:
         chunk = sock.recv(n - len(buf))
@@ -18,11 +12,7 @@ def _read_bytes(sock: socket.socket, n: int) -> bytes:
     return buf
 
 def send_ack(sock, bet: Bet):
-    if bet is None:
-        # Usar 0xFFFFFFFF (uint32) como código de error
-        ack_value = 0xFFFFFFFF
-    else:
-        ack_value = bet.number
+    ack_value = bet.number if bet else 0xFFFFFFFF
     ack = struct.pack('>I', ack_value)
     _send_all(sock, ack)
 
@@ -36,13 +26,9 @@ def _send_all(sock, data: bytes):
 
 def read_message(sock: socket.socket) -> str:
     header = _read_bytes(sock, 2)
-    if not header:
-        raise EOFError("Socket closed")
-
     length = struct.unpack(">H", header)[0]
     data = _read_bytes(sock, length)
     return data.decode("utf-8")
-
 
 def read_bet_batch(text: str) -> list[Bet]:
     bet_strings = text.strip().split(";")
@@ -62,31 +48,8 @@ def read_bet_batch(text: str) -> list[Bet]:
     return bets
 
 def send_winners(sock, available: bool, winners: list[str] = None, msg: str = ""):
-    """
-    Envía la lista de ganadores al cliente.
-    Si available==False, envía un mensaje de error (msg).
-    Si available==True, envía los DNIs separados por coma.
-    """
-    if available:
-        payload = ",".join(winners) if winners else ""
-    else:
-        payload = msg
-
+    payload = ",".join(winners) if available else msg
     data = payload.encode("utf-8")
-    length = len(data)
-    header = struct.pack(">H", length)
-
-    _send_all(sock, header)
-    _send_all(sock, data)
-
-def send_notification_ack(sock):
-    """
-    Envía confirmación de notificación FIN_APUESTAS.
-    """
-    payload = "OK"
-    data = payload.encode("utf-8")
-    length = len(data)
-    header = struct.pack(">H", length)
-
+    header = struct.pack(">H", len(data))
     _send_all(sock, header)
     _send_all(sock, data)
