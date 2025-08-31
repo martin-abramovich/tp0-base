@@ -1,7 +1,7 @@
 import socket
 import logging
 from common.utils import has_won, load_bets, store_bets
-from .protocol import read_message, send_ack, read_bet_batch, send_winners, send_text
+from .protocol import read_message, send_ack, read_bet_batch, send_winners
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -30,22 +30,20 @@ class Server:
 
     def __handle_client_connection(self, client_sock):
         try:
-            while True:
-                try:
-                    raw_message = read_message(client_sock)
-                except ConnectionError:
-                    # Cliente cerró la conexión
-                    break
+            try:
+                raw_message = read_message(client_sock)
+            except ConnectionError:
+                return
 
-                if not raw_message:
-                    break
+            if not raw_message:
+                return
 
-                if raw_message.startswith("FIN_APUESTAS:"):
-                    self._handle_finish_bet(client_sock, raw_message)
-                elif raw_message.startswith("PEDIR_GANADORES:"):
-                    self._handle_request_winners(client_sock, raw_message)
-                else:
-                    self._handle_bet_batch(client_sock, raw_message)
+            if raw_message.startswith("FIN_APUESTAS:"):
+                self._handle_finish_bet(client_sock, raw_message)
+            elif raw_message.startswith("PEDIR_GANADORES:"):
+                self._handle_request_winners(client_sock, raw_message)
+            else:
+                self._handle_bet_batch(client_sock, raw_message)
 
         except OSError as e:
             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
@@ -62,13 +60,11 @@ class Server:
         agency_id = int(raw_message.split(":", 1)[1])
         self.agencies_ended.add(agency_id)
         logging.info(f'action: fin_apuestas | agency_id: {agency_id} | result: success ')
+        # Enviar una respuesta vacía para que el cliente pueda continuar
+        # (el cliente espera un mensaje con header de 2 bytes y payload)
+        send_winners(client_sock, available=True, winners=[])
         if self.agencies_participated and self.agencies_participated.issubset(self.agencies_ended):
             self._draw_lottery()
-        # Enviar un ACK textual para que el cliente avance
-        try:
-            send_text(client_sock, "OK")
-        except OSError as e:
-            logging.error(f"action: fin_apuestas_ack | result: fail | error: {e}")
 
     def _handle_bet_batch(self, client_sock, raw_message):
         bets = read_bet_batch(raw_message)

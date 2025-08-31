@@ -150,11 +150,6 @@ func (c *Client) StartClientLoop() {
 
 // sendAllBets envía todas las apuestas en batches usando una conexión dedicada
 func (c *Client) sendAllBets(bets []Bet) bool {
-	if err := c.createClientSocket(); err != nil {
-		return false
-	}
-	defer c.conn.Close()
-
 	allBetsSent := true
 	for i := 0; i < len(bets); i += c.config.BatchMaxAmount {
 		end := i + c.config.BatchMaxAmount
@@ -163,14 +158,23 @@ func (c *Client) sendAllBets(bets []Bet) bool {
 		}
 		batch := bets[i:end]
 
-		if err := sendBetBatch(c.conn, batch); err != nil {
-			log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
-				c.config.ID, err)
+		// Abrir una conexión nueva por batch (el servidor procesa un mensaje por conexión)
+		if err := c.createClientSocket(); err != nil {
 			allBetsSent = false
 			break
 		}
 
+		if err := sendBetBatch(c.conn, batch); err != nil {
+			log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
+				c.config.ID, err)
+			allBetsSent = false
+			c.conn.Close()
+			break
+		}
+
 		ack, err := receiveAck(c.conn)
+		// Cerrar la conexión después de leer el ACK del batch
+		c.conn.Close()
 		last := batch[len(batch)-1]
 		if err != nil {
 			log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",

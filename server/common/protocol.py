@@ -53,9 +53,3 @@ def send_winners(sock, available: bool, winners: list[str] = None, msg: str = ""
     header = struct.pack(">H", len(data))
     _send_all(sock, header)
     _send_all(sock, data)
-
-def send_text(sock: socket.socket, msg: str):
-    data = msg.encode("utf-8")
-    header = struct.pack(">H", len(data))
-    _send_all(sock, header)
-    _send_all(sock, data)
