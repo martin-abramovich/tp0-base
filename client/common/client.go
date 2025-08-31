@@ -187,7 +187,7 @@ func (c *Client) notifyEnd() {
 }
 
 func (c *Client) getWinners() {
-	for {
+	for attempts := 0; attempts < 10; attempts++ {
 		if c.conn == nil {
 			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, "no active connection")
 			return
@@ -220,11 +220,12 @@ func (c *Client) getWinners() {
 				}
 			}
 			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
-			break
+			return
 		}
 		// Respuesta inesperada: reintentar
 		time.Sleep(500 * time.Millisecond)
 	}
+	log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, "max retries exceeded")
 }
 
 // StopClientLoop Stops the client loop
