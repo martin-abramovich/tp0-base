@@ -59,7 +59,8 @@ class Server:
         try:
             while True:
                 raw_message = read_message(client_sock)
-                logging.debug(f"action: message_received | message_length: {len(raw_message)}")
+                logging.info(f"action: message_received | result: in_progress | message_length: {len(raw_message)}")
+
 
                 if not raw_message:
                     break
