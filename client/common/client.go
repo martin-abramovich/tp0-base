@@ -163,7 +163,20 @@ func (c *Client) StartClientLoop() {
 		}
 	}
 
-	log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+	if err := sendNotification(c.conn, c.config.ID); err != nil {
+		log.Errorf("action: fin_apuestas | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	log.Infof("action: fin_apuestas | result: success | client_id: %v", c.config.ID)
+
+	winners, err := requestWinners(c.conn, c.config.ID)
+	if err != nil {
+		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", len(winners))
 }
 
 // StopClientLoop Stops the client loop

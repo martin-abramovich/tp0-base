@@ -105,3 +105,53 @@ func sendBetBatch(conn net.Conn, bets []Bet) error {
 
 	return nil
 }
+
+func sendNotification(conn net.Conn, agencyID string) error {
+	payload := []byte("FIN_APUESTAS:" + agencyID)
+	length := uint16(len(data))
+
+	header := make([]byte, 2)
+	binary.BigEndian.PutUint16(header, length)
+
+	if err := writeAll(conn, header); err != nil {
+		return fmt.Errorf("error sending header: %v", err)
+	}
+
+	if err := writeAll(conn, data); err != nil {
+		return fmt.Errorf("error sending payload: %v", err)
+	}
+
+	return nil
+}
+
+func requestWinners(conn net.Conn, agencyID string) ([]Winners, error) {
+	payload := []byte("PEDIR_GANADORES:" + agencyID)
+	length := uint16(len(data))
+
+	header := make([]byte, 2)
+	binary.BigEndian.PutUint16(header, length)
+
+	if err := writeAll(conn, header); err != nil {
+		return nil, fmt.Errorf("error sending header: %v", err)
+	}
+
+	if err := writeAll(conn, data); err != nil {
+		return nil, fmt.Errorf("error sending payload: %v", err)
+	}
+
+	// Leer respuesta
+	lenbuf := make([]byte, 2)
+	if err := readAll(conn, lenbuf); err != nil {
+		return nil, fmt.Errorf("error reading header: %v", err)
+	}
+	respLength := binary.BigEndian.Uint16(lenbuf)
+	respData := make([]byte, respLength)
+	if err := readAll(conn, respData); err != nil {
+		return nil, fmt.Errorf("error reading payload: %v", err)
+	}
+
+	resp = string(respData)
+	winners := strings.Split(resp, ";")
+	
+	return winners, nil
+}
