@@ -101,7 +101,7 @@ func (c *Client) createClientSocket() error {
 	return nil
 }
 
-// StartClientLoop sends all bets reusing a single connection
+// StartClientLoop sends all bets and then notifies completion
 func (c *Client) StartClientLoop() {
 	betsFile := fmt.Sprintf("/agency-%s.csv", c.config.ID)
 	bets, err := readBetsFromFile(betsFile, c.config.ID)
@@ -111,7 +111,16 @@ func (c *Client) StartClientLoop() {
 	}
 
 	if len(bets) == 0 {
-		log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+		log.Infof("action: no_bets_to_send | client_id: %v", c.config.ID)
+		// Aún así enviar FIN_APUESTAS para indicar que esta agencia "terminó"
+		if err := c.sendFinApuestas(); err != nil {
+			log.Errorf("action: fin_apuestas | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return
+		}
+		if err := c.requestWinnersWithRetry(); err != nil {
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return
+		}
 		return
 	}
 
@@ -119,8 +128,30 @@ func (c *Client) StartClientLoop() {
 		c.config.BatchMaxAmount = len(bets)
 	}
 
-	if err := c.createClientSocket(); err != nil {
+	// Fase 1: Enviar todas las apuestas
+	allBetsSent := c.sendAllBets(bets)
+	
+	log.Infof("action: all_batches_processed | client_id: %v | bets_sent: %v", c.config.ID, allBetsSent)
+
+	// Fase 2: Enviar notificación FIN_APUESTAS (siempre, incluso si hubo errores)
+	if err := c.sendFinApuestas(); err != nil {
+		log.Errorf("action: fin_apuestas | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
+	}
+
+	// Fase 3: Solicitar ganadores con reintentos
+	if err := c.requestWinnersWithRetry(); err != nil {
+		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	log.Infof("action: exit | result: success | client_id: %v", c.config.ID)
+}
+
+// sendAllBets envía todas las apuestas en batches usando una conexión dedicada
+func (c *Client) sendAllBets(bets []Bet) bool {
+	if err := c.createClientSocket(); err != nil {
+		return false
 	}
 	defer c.conn.Close()
 
@@ -134,9 +165,7 @@ func (c *Client) StartClientLoop() {
 
 		if err := sendBetBatch(c.conn, batch); err != nil {
 			log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
+				c.config.ID, err)
 			allBetsSent = false
 			break
 		}
@@ -145,14 +174,11 @@ func (c *Client) StartClientLoop() {
 		last := batch[len(batch)-1]
 		if err != nil {
 			log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
+				c.config.ID, err)
 			// No marcar como error crítico si es el último batch
 			if end < len(bets) {
 				allBetsSent = false
 			}
-			// Continuar para intentar enviar FIN_APUESTAS de todas formas
 			continue
 		}
 
@@ -165,38 +191,60 @@ func (c *Client) StartClientLoop() {
 			log.Errorf("action: apuestas_enviadas | result: fail")
 		}
 	}
+	return allBetsSent
+}
 
-	// Siempre intentar enviar FIN_APUESTAS, incluso si hubo errores
-	if !allBetsSent {
-		log.Infof("action: some_bets_failed | client_id: %v | but_proceeding_with_notification", c.config.ID)
+// sendFinApuestas envía la notificación FIN_APUESTAS usando una conexión nueva
+func (c *Client) sendFinApuestas() error {
+	if err := c.createClientSocket(); err != nil {
+		return err
 	}
+	defer c.conn.Close()
 
-	// Intentar enviar FIN_APUESTAS, reconectando si es necesario
+	log.Infof("action: sending_fin_apuestas | client_id: %v", c.config.ID)
+
 	if err := sendNotification(c.conn, c.config.ID); err != nil {
-		log.Infof("action: fin_apuestas | result: retry | client_id: %v | error: %v", c.config.ID, err)
-		// Intentar reconectar
-		c.conn.Close()
-		if err := c.createClientSocket(); err != nil {
-			log.Errorf("action: fin_apuestas | result: fail | client_id: %v | reconnect_error: %v", c.config.ID, err)
-			return
-		}
-		// Reintentar envío de notificación
-		if err := sendNotification(c.conn, c.config.ID); err != nil {
-			log.Errorf("action: fin_apuestas | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return
-		}
+		return fmt.Errorf("error sending FIN_APUESTAS: %v", err)
 	}
 
 	log.Infof("action: fin_apuestas | result: success | client_id: %v", c.config.ID)
+	return nil
+}
 
-	winners, err := requestWinners(c.conn, c.config.ID)
-	if err != nil {
-		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return
+// requestWinnersWithRetry solicita ganadores con reintentos usando conexiones nuevas
+func (c *Client) requestWinnersWithRetry() error {
+	const maxRetries = 10
+	const retryDelay = 1 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Infof("action: request_winners | attempt: %d | client_id: %v", attempt, c.config.ID)
+		
+		// Crear conexión nueva para cada intento
+		if err := c.createClientSocket(); err != nil {
+			log.Errorf("action: request_winners | result: fail | attempt: %d | client_id: %v | error: %v",
+				attempt, c.config.ID, err)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		winners, err := requestWinners(c.conn, c.config.ID)
+		c.conn.Close()
+
+		if err != nil {
+			log.Infof("action: request_winners | result: retry | attempt: %d | client_id: %v | error: %v",
+				attempt, c.config.ID, err)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return fmt.Errorf("failed after %d attempts: %v", maxRetries, err)
+		}
+
+		log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", len(winners))
+		return nil
 	}
 
-	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", len(winners))
-	log.Infof("action: exit | result: success | client_id: %v", c.config.ID)
+	return fmt.Errorf("exceeded maximum retries (%d)", maxRetries)
 }
 
 // StopClientLoop Stops the client loop

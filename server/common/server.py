@@ -108,7 +108,7 @@ class Server:
                 store_bets([bet])
                 logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
                 # Trackear agencias que participan
-                self.agencies_participated.add(bet.agency)
+                self.agencies_participated.add(int(bet.agency))
             except Exception as e:
                 logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
                 success = False
