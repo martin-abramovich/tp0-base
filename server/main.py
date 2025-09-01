@@ -11,9 +11,9 @@ def initialize_config():
 
     Function that search and parse program configuration parameters in the
     program environment variables first and the in a config file. 
-    If at least one of the config parameters is not found a KeyError exception 
-    is thrown. If a parameter could not be parsed, a ValueError is thrown. 
-    If parsing succeeded, the function returns a ConfigParser object 
+    If at least one of the config parameters is not found a KeyError exception
+    is thrown. If a parameter could not be parsed, a ValueError is thrown.
+    If parsing succeeded, the function returns a ConfigParser object
     with config parameters
     """
 
@@ -26,6 +26,7 @@ def initialize_config():
         config_params["port"] = int(os.getenv('SERVER_PORT', config["DEFAULT"]["SERVER_PORT"]))
         config_params["listen_backlog"] = int(os.getenv('SERVER_LISTEN_BACKLOG', config["DEFAULT"]["SERVER_LISTEN_BACKLOG"]))
         config_params["logging_level"] = os.getenv('LOGGING_LEVEL', config["DEFAULT"]["LOGGING_LEVEL"])
+        config_params["expected_agencies"] = int(os.getenv('EXPECTED_AGENCIES', config["DEFAULT"]["EXPECTED_AGENCIES"]))
     except KeyError as e:
         raise KeyError("Key was not found. Error: {} .Aborting server".format(e))
     except ValueError as e:
@@ -39,16 +40,18 @@ def main():
     logging_level = config_params["logging_level"]
     port = config_params["port"]
     listen_backlog = config_params["listen_backlog"]
+    expected_agencies = config_params["expected_agencies"]
 
     initialize_log(logging_level)
 
     # Log config parameters at the beginning of the program to verify the configuration
     # of the component
     logging.debug(f"action: config | result: success | port: {port} | "
-                  f"listen_backlog: {listen_backlog} | logging_level: {logging_level}")
+                  f"listen_backlog: {listen_backlog} | logging_level: {logging_level} | "
+                  f"expected_agencies: {expected_agencies}")
 
     # Initialize server and start server loop
-    server = Server(port, listen_backlog)
+    server = Server(port, listen_backlog, expected_agencies)
     signal.signal(signal.SIGTERM, server.handle_sigterm)
     server.run()
 

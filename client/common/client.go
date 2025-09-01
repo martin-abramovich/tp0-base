@@ -103,6 +103,13 @@ func (c *Client) createClientSocket() error {
 
 // StartClientLoop sends all bets reusing a single connection
 func (c *Client) StartClientLoop() {
+	select {
+	case <-c.stop:
+		return
+	default:
+		// Continuar con la ejecución
+	}
+
 	betsFile := fmt.Sprintf("/agency-%s.csv", c.config.ID)
 	bets, err := readBetsFromFile(betsFile, c.config.ID)
 	if err != nil {
@@ -120,7 +127,47 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
+	// Enviar apuestas
+	if err := c.sendBets(bets); err != nil {
+		log.Errorf("action: send_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	// Notificar fin de envío
+	if err := c.notifyEnd(); err != nil {
+		log.Errorf("action: notify_end | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	// Consultar ganadores (manteniendo la misma conexión)
+	if err := c.requestWinners(); err != nil {
+		log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	// Cerrar conexión después de obtener ganadores
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+
+	// Pequeño delay para dar tiempo a que el agregador de logs entregue
+	// la línea de consulta antes de cortar por cantidad de 'exit'
+	time.Sleep(2 * time.Second)
+	// Log de finalización explícito para que los tests detecten el evento de salida
+	log.Infof("action: exit | result: success")
+}
+
+// sendBets envía todas las apuestas en lotes
+func (c *Client) sendBets(bets []Bet) error {
 	for i := 0; i < len(bets); i += c.config.BatchMaxAmount {
+		select {
+		case <-c.stop:
+			return fmt.Errorf("client stopped")
+		default:
+			// Continuar con la ejecución
+		}
+
 		end := i + c.config.BatchMaxAmount
 		if end > len(bets) {
 			end = len(bets)
@@ -132,7 +179,7 @@ func (c *Client) StartClientLoop() {
 				c.config.ID,
 				err,
 			)
-			return
+			return err
 		}
 
 		ack, err := receiveAck(c.conn)
@@ -146,7 +193,7 @@ func (c *Client) StartClientLoop() {
 				c.config.ID,
 				err,
 			)
-			return
+			return err
 		}
 
 		log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", last.Documento, last.Numero)
@@ -160,51 +207,61 @@ func (c *Client) StartClientLoop() {
 	}
 
 	log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+	return nil
+}
 
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
-
-	// Notificar fin de envío en una conexión corta
-	if err := c.createClientSocket(); err != nil {
-		return
-	}
+// notifyEnd notifica al servidor que se terminó el envío de apuestas
+func (c *Client) notifyEnd() error {
 	endMsg := fmt.Sprintf("END|%s", c.config.ID)
 	if err := sendTextFrame(c.conn, endMsg); err != nil {
 		log.Errorf("action: fin_envio | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		c.conn.Close()
-		c.conn = nil
-		return
+		return err
 	}
-	c.conn.Close()
-	c.conn = nil
+	return nil
+}
 
-	// Consultar ganadores hasta que el sorteo esté listo (reconectando en cada intento)
-	for {
-		if err := c.createClientSocket(); err != nil {
-			return
+// requestWinners consulta ganadores hasta que el sorteo esté listo (máximo 10 intentos)
+func (c *Client) requestWinners() error {
+	maxAttempts := 10
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		select {
+		case <-c.stop:
+			return fmt.Errorf("client stopped")
+		default:
+			// Continuar con la ejecución
 		}
+
 		getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
 		if err := sendTextFrame(c.conn, getMsg); err != nil {
-			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			c.conn.Close()
-			c.conn = nil
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v | attempt: %d/%d", 
+				c.config.ID, err, attempt, maxAttempts)
+			if attempt == maxAttempts {
+				return err
+			}
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
+
 		resp, err := readTextFrame(c.conn)
-		c.conn.Close()
-		c.conn = nil
 		if err != nil {
-			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v | attempt: %d/%d", 
+				c.config.ID, err, attempt, maxAttempts)
+			if attempt == maxAttempts {
+				return err
+			}
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
+
 		if resp == "NOT_READY" {
+			log.Infof("action: consulta_ganadores | result: not_ready | attempt: %d/%d", attempt, maxAttempts)
+			if attempt == maxAttempts {
+				return fmt.Errorf("sorteo no listo después de %d intentos", maxAttempts)
+			}
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
+
 		if strings.HasPrefix(resp, "WINNERS|") {
 			list := strings.TrimPrefix(resp, "WINNERS|")
 			cant := 0
@@ -217,17 +274,19 @@ func (c *Client) StartClientLoop() {
 				}
 			}
 			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
-			break
+			return nil
 		}
+
 		// Respuesta inesperada: reintentar
+		log.Warningf("action: consulta_ganadores | result: unexpected_response | response: %s | attempt: %d/%d", 
+			resp, attempt, maxAttempts)
+		if attempt == maxAttempts {
+			return fmt.Errorf("respuesta inesperada después de %d intentos: %s", maxAttempts, resp)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Pequeño delay para dar tiempo a que el agregador de logs entregue
-	// la línea de consulta antes de cortar por cantidad de 'exit'
-	time.Sleep(2 * time.Second)
-	// Log de finalización explícito para que los tests detecten el evento de salida
-	log.Infof("action: exit | result: success")
+	return fmt.Errorf("máximo número de intentos alcanzado: %d", maxAttempts)
 }
 
 // StopClientLoop Stops the client loop
