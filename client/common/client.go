@@ -116,16 +116,12 @@ func (c *Client) StartClientLoop() {
 			return
 		}
 
+		defer c.conn.Close()
 
 		c.sendBets(bets)
 		log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
 
 		c.notifyEnd()
-		// Cerrar la conexión para liberar al servidor de este cliente
-		if c.conn != nil {
-			c.conn.Close()
-			c.conn = nil
-		}
 		log.Infof("action: fin_envio | result: success | client_id: %v", c.config.ID)
 
 		c.getWinners()
@@ -192,35 +188,22 @@ func (c *Client) notifyEnd() {
 
 func (c *Client) getWinners() {
 	for attempts := 0; attempts < 10; attempts++ {
-		// abrir nueva conexión por intento
-		if err := c.createClientSocket(); err != nil {
-			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			time.Sleep(500 * time.Millisecond)
-			continue
+		if c.conn == nil {
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, "no active connection")
+			return
 		}
-		conn := c.conn
-
 		getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
-		if err := sendTextFrame(conn, getMsg); err != nil {
+		if err := sendTextFrame(c.conn, getMsg); err != nil {
 			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			conn.Close()
-			c.conn = nil
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		resp, err := readTextFrame(conn)
+		resp, err := readTextFrame(c.conn)
 		if err != nil {
 			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			conn.Close()
-			c.conn = nil
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-
-		// cerrar siempre la conexión de consulta
-		conn.Close()
-		c.conn = nil
-
 		if resp == "NOT_READY" {
 			time.Sleep(500 * time.Millisecond)
 			continue
