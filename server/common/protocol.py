@@ -74,4 +74,3 @@ def read_bet_batch(sock: socket.socket) -> list[Bet]:
     return parse_bet_batch_text(text)
 
 
-

@@ -2,10 +2,10 @@ import socket
 import logging
 
 from common.utils import store_bets, load_bets, has_won
-from .protocol import send_ack, read_frame_text, parse_bet_batch_text, send_text_frame
+from .protocol import read_bet_batch, send_ack, read_frame_text, parse_bet_batch_text, send_text_frame
 
 class Server:
-    def __init__(self, port, listen_backlog, expected_agencies):
+    def __init__(self, port, listen_backlog):
         # Initialize server socket
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
@@ -14,8 +14,8 @@ class Server:
         # Estado del sorteo
         self._finished_agencies: set[int] = set()
         self._lottery_done: bool = False
-        # Cantidad de agencias esperadas
-        self.expected_agencies = expected_agencies
+        # Para soportar cantidad variable de clientes, usamos el mayor ID visto (1..N)
+        self._max_agency_id_seen: int = 0
 
     def run(self):
         """
@@ -74,6 +74,8 @@ class Server:
                         try:
                             store_bets([bet])
                             logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+                            if bet.agency > self._max_agency_id_seen:
+                                self._max_agency_id_seen = bet.agency
                         except Exception as e:
                             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
                             success = False
@@ -91,8 +93,10 @@ class Server:
                 if text.startswith('END|'):
                     try:
                         agency_id = int(text.split('|', 1)[1])
+                        if agency_id > self._max_agency_id_seen:
+                            self._max_agency_id_seen = agency_id
                         self._finished_agencies.add(agency_id)
-                        if self.expected_agencies == len(self._finished_agencies) and not self._lottery_done:
+                        if not self._lottery_done and self._max_agency_id_seen > 0 and len(self._finished_agencies) >= self._max_agency_id_seen:
                             self._lottery_done = True
                             logging.info('action: sorteo | result: success')
                     except Exception as e:
@@ -103,6 +107,8 @@ class Server:
                 if text.startswith('GET_WINNERS|'):
                     try:
                         agency_id = int(text.split('|', 1)[1])
+                        if agency_id > self._max_agency_id_seen:
+                            self._max_agency_id_seen = agency_id
                     except Exception:
                         send_text_frame(client_sock, 'NOT_READY')
                         continue
