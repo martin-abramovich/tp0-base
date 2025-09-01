@@ -1,3 +1,43 @@
+## Ejercicio 1: Generación de Docker Compose
+
+### Cómo ejecutar el ejercicio
+
+1. **Generar el archivo Docker Compose:**
+   ```bash
+   ./generar-compose.sh NOMBRE-ARCHIVO CANT-CLIENTES
+   ```
+
+   Por ejemplo, si ejecutamos
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+   Se genera un archivo `docker-compose-dev.yaml` con 5 clientes (client1, client2, client3, client4, client5).
+
+2. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+4. **Ver los logs:**
+   ```bash
+   make docker-compose-logs
+   ```
+
+5. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
+### Aspectos importantes de la solución
+
+#### Arquitectura del Script
+- **`generar-compose.sh`**: Script bash que recibe dos parámetros:
+  - `$1`: Nombre del archivo de salida (ej: `docker-compose-dev.yaml`)
+  - `$2`: Cantidad de clientes a generar
+- **Generación dinámica**: Utiliza un bucle para crear servicios cliente con nombres secuenciales (`client1`, `client2`, etc.)
+
+---
+
 # TP0: Docker + Comunicaciones + Concurrencia
 
 En el presente repositorio se provee un esqueleto básico de cliente/servidor, en donde todas las dependencias del mismo se encuentran encapsuladas en containers. Los alumnos deberán resolver una guía de ejercicios incrementales, teniendo en cuenta las condiciones de entrega descritas al final de este enunciado.
