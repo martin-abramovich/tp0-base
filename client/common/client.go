@@ -134,14 +134,16 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
-
+	// Consultar ganadores (manteniendo la misma conexión)
 	if err := c.requestWinners(); err != nil {
 		log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
+	}
+
+	// Cerrar conexión después de obtener ganadores
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
 	}
 
 	// Pequeño delay para dar tiempo a que el agregador de logs entregue
@@ -213,56 +215,47 @@ func (c *Client) notifyEnd() error {
 	return nil
 }
 
-// requestWinners consulta ganadores hasta que el sorteo esté listo (reconectando en cada intento)
+// requestWinners consulta ganadores una vez y espera la respuesta del servidor
 func (c *Client) requestWinners() error {
-	for {
-		select {
-		case <-c.stop:
-			return fmt.Errorf("client stopped")
-		default:
-			// Continuar con la ejecución
-		}
+	getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
+	if err := sendTextFrame(c.conn, getMsg); err != nil {
+		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return err
+	}
 
-		if err := c.createClientSocket(); err != nil {
-			return err
-		}
-		getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
-		if err := sendTextFrame(c.conn, getMsg); err != nil {
-			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			c.conn.Close()
-			c.conn = nil
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-		resp, err := readTextFrame(c.conn)
-		c.conn.Close()
-		c.conn = nil
+	// Leer primera respuesta
+	resp, err := readTextFrame(c.conn)
+	if err != nil {
+		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return err
+	}
+
+	if resp == "NOT_READY" {
+		// El servidor nos mantendrá la conexión abierta y nos enviará los ganadores cuando esté listo
+		// Esperamos la segunda respuesta con los ganadores
+		resp, err = readTextFrame(c.conn)
 		if err != nil {
 			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			time.Sleep(500 * time.Millisecond)
-			continue
+			return err
 		}
-		if resp == "NOT_READY" {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-		if strings.HasPrefix(resp, "WINNERS|") {
-			list := strings.TrimPrefix(resp, "WINNERS|")
-			cant := 0
-			if strings.TrimSpace(list) != "" {
-				parts := strings.Split(list, ",")
-				for _, p := range parts {
-					if strings.TrimSpace(p) != "" {
-						cant++
-					}
+	}
+
+	if strings.HasPrefix(resp, "WINNERS|") {
+		list := strings.TrimPrefix(resp, "WINNERS|")
+		cant := 0
+		if strings.TrimSpace(list) != "" {
+			parts := strings.Split(list, ",")
+			for _, p := range parts {
+				if strings.TrimSpace(p) != "" {
+					cant++
 				}
 			}
-			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
-			return nil
 		}
-		// Respuesta inesperada: reintentar
-		time.Sleep(500 * time.Millisecond)
+		log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
+		return nil
 	}
+
+	return fmt.Errorf("respuesta inesperada: %s", resp)
 }
 
 // StopClientLoop Stops the client loop

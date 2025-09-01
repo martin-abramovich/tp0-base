@@ -16,6 +16,8 @@ class Server:
         self._lottery_done: bool = False
         # Cantidad esperada de agencias para realizar el sorteo
         self._expected_agencies: int = expected_agencies
+        # Conexiones de clientes esperando ganadores
+        self._pending_winners_requests: dict[int, object] = {}
 
     def run(self):
         """
@@ -95,6 +97,8 @@ class Server:
                         if not self._lottery_done and len(self._finished_agencies) >= self._expected_agencies:
                             self._lottery_done = True
                             logging.info('action: sorteo | result: success')
+                            # Notificar a todos los clientes esperando ganadores
+                            self._notify_pending_winners()
                     except Exception as e:
                         logging.error(f"action: end_notify | result: fail | error: {e}")
                     # No es necesario enviar respuesta para END
@@ -108,23 +112,14 @@ class Server:
                         continue
 
                     if not self._lottery_done:
+                        # Guardar conexión para notificar cuando el sorteo esté listo
+                        self._pending_winners_requests[agency_id] = client_sock
                         send_text_frame(client_sock, 'NOT_READY')
+                        return  # No cerrar la conexión, la mantenemos abierta
+                    else:
+                        # Sorteo ya realizado, enviar ganadores inmediatamente
+                        self._send_winners_to_agency(client_sock, agency_id)
                         continue
-
-                    # Calcular ganadores para la agencia
-                    winners: list[str] = []
-                    try:
-                        for bet in load_bets():
-                            if bet.agency == agency_id and has_won(bet):
-                                winners.append(bet.document)
-                    except Exception as e:
-                        logging.error(f"action: consulta_ganadores | result: fail | error: {e}")
-                        send_text_frame(client_sock, 'WINNERS|')
-                        continue
-
-                    payload = 'WINNERS|' + (','.join(winners))
-                    send_text_frame(client_sock, payload)
-                    continue
 
                 # Mensaje desconocido
                 logging.warning(f"action: mensaje_desconocido | result: fail | payload: {text}")
@@ -147,3 +142,38 @@ class Server:
         c, addr = self._server_socket.accept()
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         return c
+
+    def _notify_pending_winners(self):
+        """
+        Notifica a todos los clientes que están esperando ganadores
+        """
+        for agency_id, client_sock in list(self._pending_winners_requests.items()):
+            try:
+                self._send_winners_to_agency(client_sock, agency_id)
+                # Remover de la lista de pendientes
+                del self._pending_winners_requests[agency_id]
+            except Exception as e:
+                logging.error(f"action: notify_winner | result: fail | agency: {agency_id} | error: {e}")
+                # Limpiar conexión rota
+                try:
+                    client_sock.close()
+                except:
+                    pass
+                del self._pending_winners_requests[agency_id]
+
+    def _send_winners_to_agency(self, client_sock, agency_id):
+        """
+        Envía los ganadores de una agencia específica
+        """
+        winners: list[str] = []
+        try:
+            for bet in load_bets():
+                if bet.agency == agency_id and has_won(bet):
+                    winners.append(bet.document)
+        except Exception as e:
+            logging.error(f"action: consulta_ganadores | result: fail | error: {e}")
+            send_text_frame(client_sock, 'WINNERS|')
+            return
+
+        payload = 'WINNERS|' + (','.join(winners))
+        send_text_frame(client_sock, payload)
