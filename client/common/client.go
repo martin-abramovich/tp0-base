@@ -254,7 +254,7 @@ func (c *Client) requestWinners() error {
 		}
 
 		if resp == "NOT_READY" {
-			log.Infof("action: consulta_ganadores | result: not_ready | attempt: %d/%d", attempt, maxAttempts)
+			log.Infof("action: consulta_ganadores | result: in_progress")
 			if attempt == maxAttempts {
 				return fmt.Errorf("sorteo no listo después de %d intentos", maxAttempts)
 			}
@@ -278,8 +278,8 @@ func (c *Client) requestWinners() error {
 		}
 
 		// Respuesta inesperada: reintentar
-		log.Warningf("action: consulta_ganadores | result: unexpected_response | response: %s | attempt: %d/%d", 
-			resp, attempt, maxAttempts)
+		log.Warningf("action: consulta_ganadores | result: fail | response: %s", 
+			resp)
 		if attempt == maxAttempts {
 			return fmt.Errorf("respuesta inesperada después de %d intentos: %s", maxAttempts, resp)
 		}
