@@ -101,7 +101,6 @@ func (c *Client) createClientSocket() error {
 	return nil
 }
 
-// StartClientLoop sends all bets reusing a single connection
 func (c *Client) StartClientLoop() {
 	select {
 	case <-c.stop:
@@ -117,8 +116,6 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	// No retornamos si no hay apuestas: igual debemos notificar fin y consultar ganadores
-
 	if c.config.BatchMaxAmount <= 0 {
 		c.config.BatchMaxAmount = len(bets)
 	}
@@ -127,25 +124,21 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	// Enviar apuestas
 	if err := c.sendBets(bets); err != nil {
 		log.Errorf("action: send_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
 	}
 
-	// Notificar fin de envío
 	if err := c.notifyEnd(); err != nil {
 		log.Errorf("action: notify_end | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
 	}
 
-	// Cerrar conexión después de notificar fin
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 	}
 
-	// Consultar ganadores (reconectando en cada intento)
 	if err := c.requestWinners(); err != nil {
 		log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
