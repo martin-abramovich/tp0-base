@@ -1,7 +1,7 @@
 import socket
 import logging
 
-from common.utils import store_bets, load_bets, has_won
+from common.thread_safe_storage import storage
 from .protocol import read_bet_batch, send_ack, read_frame_text, parse_bet_batch_text, send_text_frame
 
 class Server:
@@ -74,7 +74,7 @@ class Server:
 
                     for bet in bets:
                         try:
-                            store_bets([bet])
+                            storage.store_bets([bet])
                             logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
                         except Exception as e:
                             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
@@ -181,8 +181,8 @@ class Server:
         """
         winners: list[str] = []
         try:
-            for bet in load_bets():
-                if bet.agency == agency_id and has_won(bet):
+            for bet in storage.load_bets():
+                if bet.agency == agency_id and storage.has_won(bet):
                     winners.append(bet.document)
         except Exception as e:
             logging.error(f"action: consulta_ganadores | result: fail | error: {e}")
