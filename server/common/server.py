@@ -2,7 +2,7 @@ import socket
 import logging
 
 from common.utils import store_bets, load_bets, has_won
-from .protocol import read_bet_batch, send_ack, read_frame_text, parse_bet_batch_text, send_text_frame
+from .protocol import send_ack, read_frame_text, parse_bet_batch_text, send_text_frame
 
 class Server:
     def __init__(self, port, listen_backlog, expected_agencies):
@@ -92,7 +92,7 @@ class Server:
                     try:
                         agency_id = int(text.split('|', 1)[1])
                         self._finished_agencies.add(agency_id)
-                        if not self._lottery_done and self.expected_agencies == len(self._finished_agencies):
+                        if self.expected_agencies == len(self._finished_agencies) and not self._lottery_done:
                             self._lottery_done = True
                             logging.info('action: sorteo | result: success')
                     except Exception as e:
