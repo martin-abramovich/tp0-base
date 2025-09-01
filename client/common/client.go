@@ -238,7 +238,7 @@ func (c *Client) requestWinners() error {
 			if attempt == maxAttempts {
 				return err
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -249,7 +249,7 @@ func (c *Client) requestWinners() error {
 			if attempt == maxAttempts {
 				return err
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -258,7 +258,7 @@ func (c *Client) requestWinners() error {
 			if attempt == maxAttempts {
 				return fmt.Errorf("sorteo no listo después de %d intentos", maxAttempts)
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -283,7 +283,7 @@ func (c *Client) requestWinners() error {
 		if attempt == maxAttempts {
 			return fmt.Errorf("respuesta inesperada después de %d intentos: %s", maxAttempts, resp)
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 	}
 
 	return fmt.Errorf("máximo número de intentos alcanzado: %d", maxAttempts)
