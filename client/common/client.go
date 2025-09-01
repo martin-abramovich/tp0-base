@@ -139,16 +139,16 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	// Consultar ganadores (manteniendo la misma conexión)
-	if err := c.requestWinners(); err != nil {
-		log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return
-	}
-
-	// Cerrar conexión después de obtener ganadores
+	// Cerrar conexión después de notificar fin
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
+	}
+
+	// Consultar ganadores (reconectando en cada intento)
+	if err := c.requestWinners(); err != nil {
+		log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
 	}
 
 	// Pequeño delay para dar tiempo a que el agregador de logs entregue
@@ -220,9 +220,8 @@ func (c *Client) notifyEnd() error {
 	return nil
 }
 
-// requestWinners consulta ganadores hasta que el sorteo esté listo (bucle hasta éxito)
+// requestWinners consulta ganadores hasta que el sorteo esté listo (reconectando en cada intento)
 func (c *Client) requestWinners() error {
-	attempt := 1
 	for {
 		select {
 		case <-c.stop:
@@ -231,29 +230,29 @@ func (c *Client) requestWinners() error {
 			// Continuar con la ejecución
 		}
 
+		if err := c.createClientSocket(); err != nil {
+			return err
+		}
 		getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
 		if err := sendTextFrame(c.conn, getMsg); err != nil {
-			log.Infof("action: consulta_ganadores | result: in_progress")
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			c.conn.Close()
+			c.conn = nil
 			time.Sleep(500 * time.Millisecond)
-			attempt++
 			continue
 		}
-
 		resp, err := readTextFrame(c.conn)
+		c.conn.Close()
+		c.conn = nil
 		if err != nil {
-			log.Infof("action: consulta_ganadores | result: in_progress")
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
 			time.Sleep(500 * time.Millisecond)
-			attempt++
 			continue
 		}
-
 		if resp == "NOT_READY" {
-			log.Infof("action: consulta_ganadores | result: in_progress")
 			time.Sleep(500 * time.Millisecond)
-			attempt++
 			continue
 		}
-
 		if strings.HasPrefix(resp, "WINNERS|") {
 			list := strings.TrimPrefix(resp, "WINNERS|")
 			cant := 0
@@ -268,11 +267,8 @@ func (c *Client) requestWinners() error {
 			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
 			return nil
 		}
-
-		// Respuesta inesperada: continuar intentando
-		log.Infof("action: consulta_ganadores | result: in_progress")
+		// Respuesta inesperada: reintentar
 		time.Sleep(500 * time.Millisecond)
-		attempt++
 	}
 }
 
