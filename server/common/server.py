@@ -115,19 +115,27 @@ class Server:
                         # Guardar conexión para notificar cuando el sorteo esté listo
                         self._pending_winners_requests[agency_id] = client_sock
                         send_text_frame(client_sock, 'NOT_READY')
-                        return  # No cerrar la conexión, la mantenemos abierta
+                        # NO cerrar la conexión, mantenerla abierta para notificar después
+                        return  # Salir del handler pero mantener conexión viva
                     else:
                         # Sorteo ya realizado, enviar ganadores inmediatamente
                         self._send_winners_to_agency(client_sock, agency_id)
-                        continue
+                        break  # Terminar después de enviar ganadores
 
                 # Mensaje desconocido
                 logging.warning(f"action: mensaje_desconocido | result: fail | payload: {text}")
 
-        except OSError as e:
-            logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
+        except Exception as e:
+            logging.error(f"action: connection_error | result: fail | error: {e}")
+            # Limpiar de pendientes si hay error
+            self._remove_from_pending(client_sock)
         finally:
-            client_sock.close()
+            # Solo cerrar si no está en la lista de pendientes
+            if not self._is_connection_pending(client_sock):
+                try:
+                    client_sock.close()
+                except:
+                    pass
 
     def __accept_new_connection(self):
         """
@@ -150,6 +158,11 @@ class Server:
         for agency_id, client_sock in list(self._pending_winners_requests.items()):
             try:
                 self._send_winners_to_agency(client_sock, agency_id)
+                # Cerrar conexión después de enviar ganadores
+                try:
+                    client_sock.close()
+                except:
+                    pass
                 # Remover de la lista de pendientes
                 del self._pending_winners_requests[agency_id]
             except Exception as e:
@@ -159,7 +172,8 @@ class Server:
                     client_sock.close()
                 except:
                     pass
-                del self._pending_winners_requests[agency_id]
+                if agency_id in self._pending_winners_requests:
+                    del self._pending_winners_requests[agency_id]
 
     def _send_winners_to_agency(self, client_sock, agency_id):
         """
@@ -177,3 +191,21 @@ class Server:
 
         payload = 'WINNERS|' + (','.join(winners))
         send_text_frame(client_sock, payload)
+
+    def _remove_from_pending(self, client_sock):
+        """
+        Remueve una conexión específica de la lista de pendientes
+        """
+        to_remove = []
+        for agency_id, sock in self._pending_winners_requests.items():
+            if sock == client_sock:
+                to_remove.append(agency_id)
+        
+        for agency_id in to_remove:
+            del self._pending_winners_requests[agency_id]
+
+    def _is_connection_pending(self, client_sock):
+        """
+        Verifica si una conexión está en la lista de pendientes
+        """
+        return any(sock == client_sock for sock in self._pending_winners_requests.values())
