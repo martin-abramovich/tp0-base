@@ -220,10 +220,10 @@ func (c *Client) notifyEnd() error {
 	return nil
 }
 
-// requestWinners consulta ganadores hasta que el sorteo esté listo (máximo 10 intentos)
+// requestWinners consulta ganadores hasta que el sorteo esté listo (bucle hasta éxito)
 func (c *Client) requestWinners() error {
-	maxAttempts := 10
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	attempt := 1
+	for {
 		select {
 		case <-c.stop:
 			return fmt.Errorf("client stopped")
@@ -233,32 +233,24 @@ func (c *Client) requestWinners() error {
 
 		getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
 		if err := sendTextFrame(c.conn, getMsg); err != nil {
-			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v | attempt: %d/%d", 
-				c.config.ID, err, attempt, maxAttempts)
-			if attempt == maxAttempts {
-				return err
-			}
-			time.Sleep(1 * time.Second)
+			log.Infof("action: consulta_ganadores | result: in_progress")
+			time.Sleep(500 * time.Millisecond)
+			attempt++
 			continue
 		}
 
 		resp, err := readTextFrame(c.conn)
 		if err != nil {
-			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v | attempt: %d/%d", 
-				c.config.ID, err, attempt, maxAttempts)
-			if attempt == maxAttempts {
-				return err
-			}
-			time.Sleep(1 * time.Second)
+			log.Infof("action: consulta_ganadores | result: in_progress")
+			time.Sleep(500 * time.Millisecond)
+			attempt++
 			continue
 		}
 
 		if resp == "NOT_READY" {
 			log.Infof("action: consulta_ganadores | result: in_progress")
-			if attempt == maxAttempts {
-				return fmt.Errorf("sorteo no listo después de %d intentos", maxAttempts)
-			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(500 * time.Millisecond)
+			attempt++
 			continue
 		}
 
@@ -277,16 +269,11 @@ func (c *Client) requestWinners() error {
 			return nil
 		}
 
-		// Respuesta inesperada: reintentar
-		log.Warningf("action: consulta_ganadores | result: fail | response: %s", 
-			resp)
-		if attempt == maxAttempts {
-			return fmt.Errorf("respuesta inesperada después de %d intentos: %s", maxAttempts, resp)
-		}
-		time.Sleep(1 * time.Second)
+		// Respuesta inesperada: continuar intentando
+		log.Infof("action: consulta_ganadores | result: in_progress")
+		time.Sleep(500 * time.Millisecond)
+		attempt++
 	}
-
-	return fmt.Errorf("máximo número de intentos alcanzado: %d", maxAttempts)
 }
 
 // StopClientLoop Stops the client loop
