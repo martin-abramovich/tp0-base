@@ -1,3 +1,58 @@
+## Ejercicio 2: Configuración con Volúmenes Docker
+
+### Descripción de la Solución
+
+El **Ejercicio 2** implementa la inyección de archivos de configuración externos usando volúmenes Docker, permitiendo modificar la configuración sin reconstruir las imágenes.
+
+#### Cambios Implementados
+
+1. **Eliminación de configuración de las imágenes**:
+   - Comentada línea `COPY ./client/config.yaml /config.yaml` en `client/Dockerfile`
+   - Agregado `config.ini` al archivo `server/.dockerignore`
+
+2. **Montaje de volúmenes en Docker Compose**:
+   - **Servidor**: `./server/config.ini:/config.ini`
+   - **Cliente**: `./client/config.yaml:/config.yaml`
+
+### Cómo Ejecutar
+
+1. **Generar archivo Docker Compose con clientes configurables**:
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 3
+   ```
+
+2. **Levantar el sistema**:
+   ```bash
+   make docker-compose-up
+   ```
+
+3. **Ver logs en tiempo real**:
+   ```bash
+   make docker-compose-logs
+   ```
+
+4. **Detener el sistema**:
+   ```bash
+   make docker-compose-down
+   ```
+
+### Aspectos Importantes de la Implementación
+
+#### Configuración Externa
+- **Servidor**: Utiliza `config.ini` montado como volumen en `/config.ini`
+- **Cliente**: Utiliza `config.yaml` montado como volumen en `/config.yaml`
+- Los archivos de configuración están persistidos en el host y se inyectan en tiempo de ejecución
+
+#### Implementación Técnica
+La solución garantiza que la configuración esté completamente separada de las imágenes Docker:
+- Los archivos de configuración se excluyen del build mediante `.dockerignore`
+- No se copian archivos de configuración en los `Dockerfile`
+- Los volúmenes montan directamente desde el sistema de archivos del host
+- La aplicación lee la configuración desde rutas fijas que se mapean dinámicamente
+
+####
+---
+
 # TP0: Docker + Comunicaciones + Concurrencia
 
 En el presente repositorio se provee un esqueleto básico de cliente/servidor, en donde todas las dependencias del mismo se encuentran encapsuladas en containers. Los alumnos deberán resolver una guía de ejercicios incrementales, teniendo en cuenta las condiciones de entrega descritas al final de este enunciado.
@@ -178,3 +233,4 @@ Se espera que se redacte una sección del README en donde se indique cómo ejecu
 Se proveen [pruebas automáticas](https://github.com/7574-sistemas-distribuidos/tp0-tests) de caja negra. Se exige que la resolución de los ejercicios pase tales pruebas, o en su defecto que las discrepancias sean justificadas y discutidas con los docentes antes del día de la entrega. El incumplimiento de las pruebas es condición de desaprobación, pero su cumplimiento no es suficiente para la aprobación. Respetar las entradas de log planteadas en los ejercicios, pues son las que se chequean en cada uno de los tests.
 
 La corrección personal tendrá en cuenta la calidad del código entregado y casos de error posibles, se manifiesten o no durante la ejecución del trabajo práctico. Se pide a los alumnos leer atentamente y **tener en cuenta** los criterios de corrección informados  [en el campus](https://campusgrado.fi.uba.ar/mod/page/view.php?id=73393).
+
