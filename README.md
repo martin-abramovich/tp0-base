@@ -1,6 +1,9 @@
-## Ejercicio 1: Generación de Docker Compose
+### Ejercicio 1
 
-### Cómo ejecutar el ejercicio
+Implementé generar-compose.sh que automatiza la creación de archivos Docker Compose con una cantidad configurable de clientes. El script recibe dos parámetros: el nombre del archivo de salida (como docker-compose-dev.yaml) y la cantidad de clientes deseada, luego utiliza un bucle en bash para generar dinámicamente los servicios cliente con nombres secuenciales (client1, client2, client3, etc.), manteniendo la estructura de red, variables de entorno y dependencias necesarias para que cada cliente pueda comunicarse correctamente con el servidor.
+
+
+#### Cómo ejecutar el ejercicio
 
 1. **Generar el archivo Docker Compose:**
    ```bash
@@ -27,14 +30,6 @@
    ```bash
    make docker-compose-down
    ```
-
-### Aspectos importantes de la solución
-
-#### Arquitectura del Script
-- **`generar-compose.sh`**: Script bash que recibe dos parámetros:
-  - `$1`: Nombre del archivo de salida (ej: `docker-compose-dev.yaml`)
-  - `$2`: Cantidad de clientes a generar
-- **Generación dinámica**: Utiliza un bucle para crear servicios cliente con nombres secuenciales (`client1`, `client2`, etc.)
 
 ---
 
