@@ -1,6 +1,26 @@
 import socket
-import struct
 from .utils import Bet
+
+def _pack_uint32_big_endian(value: int) -> bytes:
+    """
+    Convierte un entero de 32 bits a bytes en formato big-endian.
+    Equivalente a struct.pack('>I', value)
+    """
+    return bytes([
+        (value >> 24) & 0xFF,
+        (value >> 16) & 0xFF, 
+        (value >> 8) & 0xFF,
+        value & 0xFF
+    ])
+
+def _unpack_uint16_big_endian(data: bytes) -> int:
+    """
+    Convierte 2 bytes en formato big-endian a un entero de 16 bits.
+    Equivalente a struct.unpack('>H', data)[0]
+    """
+    if len(data) != 2:
+        raise ValueError("Se esperan exactamente 2 bytes")
+    return (data[0] << 8) | data[1]
 
 def _read_bytes(sock: socket.socket, n: int) -> bytes:
     """
@@ -23,7 +43,7 @@ def send_ack(sock, bet: Bet):
         ack_value = 0xFFFFFFFF
     else:
         ack_value = bet.number
-    ack = struct.pack('>I', ack_value)
+    ack = _pack_uint32_big_endian(ack_value)
     _send_all(sock, ack)
 
 def _send_all(sock, data: bytes):
@@ -39,7 +59,7 @@ def read_bet_batch(sock: socket.socket) -> list[Bet]:
     if not header:
         raise EOFError("Socket closed")
     
-    length = struct.unpack(">H", header)[0]
+    length = _unpack_uint16_big_endian(header)
     data = _read_bytes(sock, length)
     text = data.decode("utf-8")
 
