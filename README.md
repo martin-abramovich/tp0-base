@@ -1,3 +1,74 @@
+### Ejercicio 5
+
+El cliente recibe los datos de una apuesta (nombre, apellido, DNI, nacimiento, número) a través de variables de entorno y los envía al servidor siguiendo un protocolo de comunicación personalizado. El servidor recibe la apuesta, la almacena usando la función `store_bets()` provista por la cátedra y responde con un ACK conteniendo el número apostado.
+
+Se implementó un protocolo  usando sockets TCP. Utiliza un header de 2 bytes en formato big-endian que indica la longitud del payload, seguido del payload en formato CSV (`agencia,nombre,apellido,documento,nacimiento,numero`) y finalmente un ACK de 4 bytes en big-endian con el número apostado como confirmación.
+
+Las funciones `readAll()` y `writeAll()` implementadas garantizan lectura y escritura completa de todos los bytes solicitados, evitando los problemas de short read/write. 
+
+El módulo `protocol` encapsula toda la lógica de comunicación de red y la estructura `Bet` define el modelo de dominio para las apuestas.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Configurar las variables de entorno para las apuestas:**
+   Las apuestas se configuran mediante variables de entorno en el `docker-compose-dev.yaml`. Por ejemplo:
+   ```yaml
+   environment:
+     - CLI_ID=1
+     - NOMBRE=Santiago Lionel  
+     - APELLIDO=Lorca
+     - DOCUMENTO=30904465
+     - NACIMIENTO=1999-03-17
+     - NUMERO=7574
+   ```
+
+### Ejercicio 4
+
+Implementé el manejo de señales SIGTERM para realizar un graceful shutdown tanto en el servidor como en el cliente. En el servidor, registré un handler de señal que al recibir SIGTERM cierra el socket del servidor, termina el loop principal y registra los pasos del shutdown. En el cliente, configuré un canal de señales que al recibir SIGTERM invoca un método que cierra el canal de parada (stop), termina el loop de mensajes y cierra la conexión activa, asegurando que todos los file descriptors se cierren correctamente antes de que termine la aplicación principal.
+
+### Ejercicio 3
+
+Implementé validar-echo-server.sh que verifica automáticamente el correcto funcionamiento del servidor echo utilizando Docker y netcat. El script ejecuta un contenedor temporal con la imagen busybox conectado a la misma red Docker (tp0_testing_net) que el servidor, envía el mensaje "hola" usando netcat al puerto 12345, captura la respuesta del servidor y verifica que sea idéntica al mensaje enviado, cumpliendo así con el comportamiento esperado de un echo server. 
+
+### Ejercicio 2
+
+Implementé la inyección de archivos de configuración externos utilizando volúmenes Docker para evitar tener que reconstruir las imágenes cada vez que se modifica la configuración. Para lograr esto, eliminé la copia de archivos de configuración de los Dockerfiles (comentando COPY ./client/config.yaml /config.yaml en el cliente y agregando config.ini al .dockerignore del servidor), y luego configuré el montaje de volúmenes en Docker Compose para mapear los archivos de configuración del host directamente a los contenedores (./server/config.ini:/config.ini para el servidor y ./client/config.yaml:/config.yaml para el cliente), permitiendo así que cualquier cambio en estos archivos sea efectivo inmediatamente al reiniciar los contenedores sin necesidad de reconstruir las imágenes.
+
+### Ejercicio 1
+
+Implementé generar-compose.sh que automatiza la creación de archivos Docker Compose con una cantidad configurable de clientes. El script recibe dos parámetros: el nombre del archivo de salida (como docker-compose-dev.yaml) y la cantidad de clientes deseada, luego utiliza un bucle en bash para generar dinámicamente los servicios cliente con nombres secuenciales (client1, client2, client3, etc.), manteniendo la estructura de red, variables de entorno y dependencias necesarias para que cada cliente pueda comunicarse correctamente con el servidor.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Generar el archivo Docker Compose:**
+   ```bash
+   ./generar-compose.sh NOMBRE-ARCHIVO CANT-CLIENTES
+   ```
+
+   Por ejemplo, si ejecutamos
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+   Se genera un archivo `docker-compose-dev.yaml` con 5 clientes (client1, client2, client3, client4, client5).
+
+2. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+4. **Ver los logs:**
+   ```bash
+   make docker-compose-logs
+   ```
+
+5. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
+####
+---
+
 # TP0: Docker + Comunicaciones + Concurrencia
 
 En el presente repositorio se provee un esqueleto básico de cliente/servidor, en donde todas las dependencias del mismo se encuentran encapsuladas en containers. Los alumnos deberán resolver una guía de ejercicios incrementales, teniendo en cuenta las condiciones de entrega descritas al final de este enunciado.
