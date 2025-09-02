@@ -2,6 +2,42 @@
 
 Implementé validar-echo-server.sh que verifica automáticamente el correcto funcionamiento del servidor echo utilizando Docker y netcat. El script ejecuta un contenedor temporal con la imagen busybox conectado a la misma red Docker (tp0_testing_net) que el servidor, envía el mensaje "hola" usando netcat al puerto 12345, captura la respuesta del servidor y verifica que sea idéntica al mensaje enviado, cumpliendo así con el comportamiento esperado de un echo server. 
 
+### Ejercicio 2
+
+Implementé la inyección de archivos de configuración externos utilizando volúmenes Docker para evitar tener que reconstruir las imágenes cada vez que se modifica la configuración. Para lograr esto, eliminé la copia de archivos de configuración de los Dockerfiles (comentando COPY ./client/config.yaml /config.yaml en el cliente y agregando config.ini al .dockerignore del servidor), y luego configuré el montaje de volúmenes en Docker Compose para mapear los archivos de configuración del host directamente a los contenedores (./server/config.ini:/config.ini para el servidor y ./client/config.yaml:/config.yaml para el cliente), permitiendo así que cualquier cambio en estos archivos sea efectivo inmediatamente al reiniciar los contenedores sin necesidad de reconstruir las imágenes.
+
+### Ejercicio 1
+
+Implementé generar-compose.sh que automatiza la creación de archivos Docker Compose con una cantidad configurable de clientes. El script recibe dos parámetros: el nombre del archivo de salida (como docker-compose-dev.yaml) y la cantidad de clientes deseada, luego utiliza un bucle en bash para generar dinámicamente los servicios cliente con nombres secuenciales (client1, client2, client3, etc.), manteniendo la estructura de red, variables de entorno y dependencias necesarias para que cada cliente pueda comunicarse correctamente con el servidor.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Generar el archivo Docker Compose:**
+   ```bash
+   ./generar-compose.sh NOMBRE-ARCHIVO CANT-CLIENTES
+   ```
+
+   Por ejemplo, si ejecutamos
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+   Se genera un archivo `docker-compose-dev.yaml` con 5 clientes (client1, client2, client3, client4, client5).
+
+2. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+4. **Ver los logs:**
+   ```bash
+   make docker-compose-logs
+   ```
+
+5. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
 ####
 ---
 
