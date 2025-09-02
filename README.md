@@ -1,55 +1,39 @@
-## Ejercicio 2: Configuración con Volúmenes Docker
+### Ejercicio 2
 
-### Descripción de la Solución
+Implementé la inyección de archivos de configuración externos utilizando volúmenes Docker para evitar tener que reconstruir las imágenes cada vez que se modifica la configuración. Para lograr esto, eliminé la copia de archivos de configuración de los Dockerfiles (comentando COPY ./client/config.yaml /config.yaml en el cliente y agregando config.ini al .dockerignore del servidor), y luego configuré el montaje de volúmenes en Docker Compose para mapear los archivos de configuración del host directamente a los contenedores (./server/config.ini:/config.ini para el servidor y ./client/config.yaml:/config.yaml para el cliente), permitiendo así que cualquier cambio en estos archivos sea efectivo inmediatamente al reiniciar los contenedores sin necesidad de reconstruir las imágenes.
 
-El **Ejercicio 2** implementa la inyección de archivos de configuración externos usando volúmenes Docker, permitiendo modificar la configuración sin reconstruir las imágenes.
+### Ejercicio 1
 
-#### Cambios Implementados
+Implementé generar-compose.sh que automatiza la creación de archivos Docker Compose con una cantidad configurable de clientes. El script recibe dos parámetros: el nombre del archivo de salida (como docker-compose-dev.yaml) y la cantidad de clientes deseada, luego utiliza un bucle en bash para generar dinámicamente los servicios cliente con nombres secuenciales (client1, client2, client3, etc.), manteniendo la estructura de red, variables de entorno y dependencias necesarias para que cada cliente pueda comunicarse correctamente con el servidor.
 
-1. **Eliminación de configuración de las imágenes**:
-   - Comentada línea `COPY ./client/config.yaml /config.yaml` en `client/Dockerfile`
-   - Agregado `config.ini` al archivo `server/.dockerignore`
 
-2. **Montaje de volúmenes en Docker Compose**:
-   - **Servidor**: `./server/config.ini:/config.ini`
-   - **Cliente**: `./client/config.yaml:/config.yaml`
+#### Cómo ejecutar el ejercicio
 
-### Cómo Ejecutar
-
-1. **Generar archivo Docker Compose con clientes configurables**:
+1. **Generar el archivo Docker Compose:**
    ```bash
-   ./generar-compose.sh docker-compose-dev.yaml 3
+   ./generar-compose.sh NOMBRE-ARCHIVO CANT-CLIENTES
    ```
 
-2. **Levantar el sistema**:
+   Por ejemplo, si ejecutamos
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+   Se genera un archivo `docker-compose-dev.yaml` con 5 clientes (client1, client2, client3, client4, client5).
+
+2. **Levantar el sistema:**
    ```bash
    make docker-compose-up
    ```
 
-3. **Ver logs en tiempo real**:
+4. **Ver los logs:**
    ```bash
    make docker-compose-logs
    ```
 
-4. **Detener el sistema**:
+5. **Detener el sistema:**
    ```bash
    make docker-compose-down
    ```
-
-### Aspectos Importantes de la Implementación
-
-#### Configuración Externa
-- **Servidor**: Utiliza `config.ini` montado como volumen en `/config.ini`
-- **Cliente**: Utiliza `config.yaml` montado como volumen en `/config.yaml`
-- Los archivos de configuración están persistidos en el host y se inyectan en tiempo de ejecución
-
-#### Implementación Técnica
-La solución garantiza que la configuración esté completamente separada de las imágenes Docker:
-- Los archivos de configuración se excluyen del build mediante `.dockerignore`
-- No se copian archivos de configuración en los `Dockerfile`
-- Los volúmenes montan directamente desde el sistema de archivos del host
-- La aplicación lee la configuración desde rutas fijas que se mapean dinámicamente
-
 ####
 ---
 
