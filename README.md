@@ -8,6 +8,9 @@ Los archivos de datos se inyectan en los containers mediante volúmenes Docker, 
 
 El tamaño máximo de cada batch es configurable mediante `batch.maxAmount` en `config.yaml`, optimizado para no exceder 8kB por paquete y mejorar significativamente el throughput del sistema.
 
+Los archivos CSV se procesan línea por línea sin cargar completamente en memoria
+- **Función `processFileInBatches()`:** Lee y procesa el archivo en chunks, liberando memoria después de cada batch
+
 **Protocolo de Comunicación por Batches:**
 - Header: 2 bytes en big-endian indicando la longitud total del payload
 - Payload: Múltiples apuestas en formato CSV separadas por `;` 
