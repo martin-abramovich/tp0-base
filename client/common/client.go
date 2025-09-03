@@ -31,9 +31,34 @@ type Client struct {
 	stop   chan struct{}
 }
 
-// processFileInBatches procesa el archivo línea por línea sin cargar todo en memoria
-// Llama a la función processor con cada batch de apuestas
-func processFileInBatches(filename string, agencyID string, batchSize int, processor func([]Bet) error) error {
+// countBetsInFile cuenta el número total de apuestas válidas sin cargar en memoria
+func countBetsInFile(filename string, agencyID string) (int, error) {
+	csvFile, err := os.Open(filename)
+	if err != nil {
+		return 0, fmt.Errorf("error opening file: %v", err)
+	}
+	defer csvFile.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(csvFile)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if _, err := parseBetLine(line, agencyID); err == nil {
+			count++
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("error reading file: %v", err)
+	}
+
+	return count, nil
+}
+
+// processBetsInBatches procesa las apuestas en batches sin cargar todo el archivo en memoria
+// Mantiene los índices originales para preservar la lógica de BatchMaxAmount y EOF
+func processBetsInBatches(filename string, agencyID string, totalBets int, batchSize int, processor func([]Bet, int, int, bool) error) error {
 	csvFile, err := os.Open(filename)
 	if err != nil {
 		return fmt.Errorf("error opening file: %v", err)
@@ -42,27 +67,38 @@ func processFileInBatches(filename string, agencyID string, batchSize int, proce
 
 	scanner := bufio.NewScanner(csvFile)
 	batch := make([]Bet, 0, batchSize)
+	currentIndex := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		if bet, err := parseBetLine(line, agencyID); err == nil {
 			batch = append(batch, bet)
-			
-			// Cuando el batch está lleno, procesarlo
-			if len(batch) >= batchSize {
-				if err := processor(batch); err != nil {
+
+			// Cuando el batch está lleno o es la última apuesta, procesarlo
+			if len(batch) >= batchSize || currentIndex+len(batch) >= totalBets {
+				batchStart := currentIndex
+				batchEnd := currentIndex + len(batch)
+				isLastBatch := batchEnd >= totalBets
+
+				if err := processor(batch, batchStart, batchEnd, isLastBatch); err != nil {
 					return err
 				}
-				batch = batch[:0] // Reutilizar slice, liberando memoria
+
+				currentIndex = batchEnd
+				batch = batch[:0] // Limpiar el batch reutilizando memoria
 			}
 		} else {
 			log.Warningf("Error parsing line '%s': %v", line, err)
 		}
 	}
 
-	// Procesar el último batch si contiene elementos
+	// Procesar último batch si quedó algo
 	if len(batch) > 0 {
-		if err := processor(batch); err != nil {
+		batchStart := currentIndex
+		batchEnd := currentIndex + len(batch)
+		isLastBatch := true
+
+		if err := processor(batch, batchStart, batchEnd, isLastBatch); err != nil {
 			return err
 		}
 	}
@@ -126,6 +162,18 @@ func (c *Client) createClientSocket() error {
 func (c *Client) StartClientLoop() {
 	betsFile := fmt.Sprintf("/agency-%s.csv", c.config.ID)
 	
+	// Primero contar el total de apuestas sin cargar en memoria
+	totalBets, err := countBetsInFile(betsFile, c.config.ID)
+	if err != nil {
+		log.Errorf("action: count_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	if totalBets == 0 {
+		log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+		return
+	}
+
 	if c.config.BatchMaxAmount <= 0 {
 		c.config.BatchMaxAmount = 100 // Default batch size para archivos grandes
 	}
@@ -135,32 +183,38 @@ func (c *Client) StartClientLoop() {
 	}
 	defer c.conn.Close()
 
-	// Procesar archivo en streaming, enviando batches directamente sin cargar todo en memoria
-	err := processFileInBatches(betsFile, c.config.ID, c.config.BatchMaxAmount, func(batch []Bet) error {
-		if err := sendBetBatch(c.conn, batch); err != nil {
-			log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
-				c.config.ID, err)
-			return err
-		}
+	// Procesar las apuestas en streaming manteniendo la lógica original
+	err = processBetsInBatches(betsFile, c.config.ID, totalBets, c.config.BatchMaxAmount, 
+		func(batch []Bet, batchStart, batchEnd int, isLastBatch bool) error {
+			if err := sendBetBatch(c.conn, batch); err != nil {
+				log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
+					c.config.ID, err)
+				return err
+			}
 
-		ack, err := receiveAck(c.conn)
-		last := batch[len(batch)-1]
-		if err != nil {
-			log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
-				c.config.ID, err)
-			return err
-		}
+			ack, err := receiveAck(c.conn)
+			last := batch[len(batch)-1]
+			if err != nil {
+				// Mantener la lógica original de EOF: solo aceptar EOF si estamos en el último batch
+				if err == io.EOF && isLastBatch {
+					log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+					return nil // Esto terminará el procesamiento exitosamente
+				}
+				log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
+					c.config.ID, err)
+				return err
+			}
 
-		log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", last.Documento, last.Numero)
+			log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", last.Documento, last.Numero)
 
-		n, err := strconv.Atoi(last.Numero)
-		if err == nil && ack == n {
-			log.Infof("action: apuestas_enviadas | result: success")
-		} else {
-			log.Errorf("action: apuestas_enviadas | result: fail")
-		}
-		return nil
-	})
+			n, err := strconv.Atoi(last.Numero)
+			if err == nil && ack == n {
+				log.Infof("action: apuestas_enviadas | result: success")
+			} else {
+				log.Errorf("action: apuestas_enviadas | result: fail")
+			}
+			return nil
+		})
 
 	if err != nil {
 		log.Errorf("action: process_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
