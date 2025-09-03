@@ -22,6 +22,11 @@ Los archivos de datos se inyectan en los containers mediante volúmenes Docker, 
 
 El tamaño máximo de cada batch es configurable mediante `batch.maxAmount` en `config.yaml`, optimizado para no exceder 8kB por paquete y mejorar significativamente el throughput del sistema.
 
+Los archivos CSV se procesan mediante **streaming processing** sin cargar completamente en memoria
+- **Función `countBetsInFile()`:** Primera pasada para contar apuestas totales línea por línea
+- **Función `processBetsInBatches()`:** Segunda pasada que procesa el archivo en pequeños batches
+Solo mantiene en memoria el batch actual (ej: 100 apuestas máx). Los slices se limpian y reutilizan con `batch[:0]` después de cada envío.
+
 **Protocolo de Comunicación por Batches:**
 - Header: 2 bytes en big-endian indicando la longitud total del payload
 - Payload: Múltiples apuestas en formato CSV separadas por `;` 
@@ -66,6 +71,7 @@ El tamaño máximo de cada batch es configurable mediante `batch.maxAmount` en `
    ```bash
    make docker-compose-down
    ```
+
 
 ### Ejercicio 5
 
