@@ -193,7 +193,7 @@ func (c *Client) StartClientLoop() {
 			c.conn.Close()
 			c.conn = nil
 		}
-		time.Sleep(2 * time.Second)
+		
 		log.Infof("action: exit | result: success")
 		return
 	}
@@ -228,9 +228,6 @@ func (c *Client) StartClientLoop() {
 		c.conn = nil
 	}
 
-	// Pequeño delay para dar tiempo a que el agregador de logs entregue
-	// la línea de consulta antes de cortar por cantidad de 'exit'
-	time.Sleep(2 * time.Second)
 	// Log de finalización explícito para que los tests detecten el evento de salida
 	log.Infof("action: exit | result: success")
 }

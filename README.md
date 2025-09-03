@@ -1,3 +1,35 @@
+### Ejercicio 8
+
+Implementé que el servidor ahora maneje conexiones y procese mensajes en paralelo utilizando multithreading. Implementé un `ThreadPoolExecutor` con hasta 20 workers que permite atender múltiples clientes simultáneamente. La arquitectura funciona con un thread principal que acepta nuevas conexiones mientras que los threads workers del pool se encargan de procesar los mensajes de cada cliente de forma independiente y paralela.
+
+Para garantizar la consistencia de datos usé mecanismos de sincronización. El estado del sorteo está protegido por `_state_lock` (un RLock que maneja `_finished_agencies` y `_lottery_done`), mientras que las conexiones pendientes están protegidas por `_pending_lock` para el diccionario `_pending_winners_requests`. Además, implementé `ThreadSafeStorage` como wrapper con RLock para todas las operaciones de almacenamiento, asegurando que múltiples threads puedan acceder al storage sin corromper los datos. El graceful shutdown también fue mejorado para coordinar el cierre del ThreadPoolExecutor y notificar a todas las conexiones pendientes antes del shutdown.
+
+Aunque Python tiene el Global Interpreter Lock (GIL) que previene la ejecución simultánea de código Python, nuestro servidor es principalmente I/O-bound, realizando operaciones como `socket.accept()`, `socket.recv()`, `socket.send()`. Durante estas operaciones de I/O bloqueantes, el GIL se libera automáticamente, permitiendo que otros threads ejecuten código Python. Como nuestro servidor pasa la mayor parte del tiempo esperando I/O de red en lugar de realizar cálculos intensivos de CPU, el multithreading es efectivo.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Generar el archivo Docker Compose con múltiples clientes:**
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+
+2. **Descomprimir los archivos en la carpeta .data `agency-{ID}.csv`**
+
+3. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+4. **Ver los logs:**
+   ```bash
+   make docker-compose-logs
+   ```
+
+4. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
 ### Ejercicio 7
 
 Después de enviar todas las apuestas, cada cliente notifica al servidor que terminó. El servidor espera que las 5 agencias reporten finalización antes de realizar el sorteo.
