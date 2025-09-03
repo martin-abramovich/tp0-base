@@ -75,7 +75,6 @@ class Server:
                     for bet in bets:
                         try:
                             store_bets([bet])
-                            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
                         except Exception as e:
                             logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
                             success = False
