@@ -1,3 +1,181 @@
+### Ejercicio 8
+
+Implementé que el servidor ahora maneje conexiones y procese mensajes en paralelo utilizando multithreading. Implementé un `ThreadPoolExecutor` con hasta 20 workers que permite atender múltiples clientes simultáneamente. La arquitectura funciona con un thread principal que acepta nuevas conexiones mientras que los threads workers del pool se encargan de procesar los mensajes de cada cliente de forma independiente y paralela.
+
+Para garantizar la consistencia de datos usé mecanismos de sincronización. El estado del sorteo está protegido por `_state_lock` (un RLock que maneja `_finished_agencies` y `_lottery_done`), mientras que las conexiones pendientes están protegidas por `_pending_lock` para el diccionario `_pending_winners_requests`. Además, implementé `ThreadSafeStorage` como wrapper con RLock para todas las operaciones de almacenamiento, asegurando que múltiples threads puedan acceder al storage sin corromper los datos. El graceful shutdown también fue mejorado para coordinar el cierre del ThreadPoolExecutor y notificar a todas las conexiones pendientes antes del shutdown.
+
+Aunque Python tiene el Global Interpreter Lock (GIL) que previene la ejecución simultánea de código Python, nuestro servidor es principalmente I/O-bound, realizando operaciones como `socket.accept()`, `socket.recv()`, `socket.send()`. Durante estas operaciones de I/O bloqueantes, el GIL se libera automáticamente, permitiendo que otros threads ejecuten código Python. Como nuestro servidor pasa la mayor parte del tiempo esperando I/O de red en lugar de realizar cálculos intensivos de CPU, el multithreading es efectivo.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Generar el archivo Docker Compose con múltiples clientes:**
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+
+2. **Descomprimir los archivos en la carpeta .data `agency-{ID}.csv`**
+
+3. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+4. **Ver los logs:**
+   ```bash
+   make docker-compose-logs
+   ```
+
+4. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
+### Ejercicio 7
+
+Después de enviar todas las apuestas, cada cliente notifica al servidor que terminó. El servidor espera que las 5 agencias reporten finalización antes de realizar el sorteo.
+
+Una vez completado el sorteo, los clientes pueden consultar la lista de ganadores específicos de su agencia. El sistema maneja consultas tempranas manteniendo conexiones activas hasta que el sorteo esté disponible.
+
+Agregué dos nuevos comandos: `END|{agency_id}` para notificar finalización y `GET_WINNERS|{agency_id}` para consultar ganadores. 
+
+El servidor registra las agencias finalizadas en `_finished_agencies`, y solo ejecuta el sorteo cuando `_finished_agencies` es igual a EXPECTED_AGENCIES que se pasa como variable de entorno. Caso contrario, el default configurado en server/config.ini es 5.
+
+El servidor utiliza las funciones `load_bets()` y `has_won()` para determinar ganadores y responde con `WINNERS|{lista_dni}` conteniendo únicamente los DNI ganadores de cada agencia. Si el sorteo aún no fue realizado, se envía `NOT_READY`, se agrega a `pending_winners_requests` que es un diccionario que guarda las conexiones de clientes que están esperando los resultados del sorteo. La clave (int) es el ID de la agencia y el valor (object) es el socket de conexión del cliente. Esto me evitó que los clientes tengas que hacer polling hasta obtener los resultados.
+
+Además. se reutiliza la misma conexión TCP para envío de apuestas, notificación de fin y consulta de ganadores. 
+
+### Ejercicio 6
+
+Los clientes ahora procesan múltiples apuestas simultáneamente mediante batches. En lugar de enviar una apuesta individual, cada cliente lee un archivo CSV con miles de apuestas y las procesa en grupos configurables.
+
+El protocolo se extendió para soportar múltiples apuestas en un solo mensaje, separando cada apuesta con `;` dentro del payload. El servidor procesa todo el batch y responde con éxito solo si todas las apuestas fueron almacenadas correctamente.
+
+Los archivos de datos se inyectan en los containers mediante volúmenes Docker, manteniendo la convención de que el cliente N utiliza el archivo `agency-{N}.csv`. 
+
+El tamaño máximo de cada batch es configurable mediante `batch.maxAmount` en `config.yaml`, optimizado para no exceder 8kB por paquete y mejorar significativamente el throughput del sistema.
+
+Los archivos CSV se procesan mediante **streaming processing** sin cargar completamente en memoria
+- **Función `countBetsInFile()`:** Primera pasada para contar apuestas totales línea por línea
+- **Función `processBetsInBatches()`:** Segunda pasada que procesa el archivo en pequeños batches
+Solo mantiene en memoria el batch actual (ej: 100 apuestas máx). Los slices se limpian y reutilizan con `batch[:0]` después de cada envío.
+
+**Protocolo de Comunicación por Batches:**
+- Header: 2 bytes en big-endian indicando la longitud total del payload
+- Payload: Múltiples apuestas en formato CSV separadas por `;` 
+  - Formato por apuesta: `agencia,nombre,apellido,documento,nacimiento,numero`
+  - Ejemplo: `1,Juan,Pérez,12345678,1990-01-01,1234;1,Ana,García,87654321,1985-06-15,5678`
+- ACK: 4 bytes en big-endian con el número de la última apuesta procesada o 0xFFFFFFFF en caso de error
+- Una sola conexión TCP por cliente reutilizada para todos los batches
+
+#### Cómo ejecutar el ejercicio
+
+1. **Extraer los datos de las agencias:**
+
+2. **Configurar el tamaño de batch:**
+   Modificar en `client/config.yaml`:
+   ```yaml
+   batch:
+     maxAmount: 100  # Número máximo de apuestas por batch
+   ```
+
+3. **Generar el archivo Docker Compose con múltiples clientes:**
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 4
+   ```
+
+4. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+5. **Ver los logs para verificar el procesamiento por batches:**
+   ```bash
+   make docker-compose-logs
+   ```
+   
+   Ejemplo
+   ```
+   server | action: apuesta_recibida | result: success | cantidad: 100
+   client1 | action: apuesta_enviada | result: success | dni: 30904465 | numero: 2201
+   ```
+
+6. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
+
+### Ejercicio 5
+
+El cliente recibe los datos de una apuesta (nombre, apellido, DNI, nacimiento, número) a través de variables de entorno y los envía al servidor siguiendo un protocolo de comunicación personalizado. El servidor recibe la apuesta, la almacena usando la función `store_bets()` provista por la cátedra y responde con un ACK conteniendo el número apostado.
+
+Se implementó un protocolo  usando sockets TCP. Utiliza un header de 2 bytes en formato big-endian que indica la longitud del payload, seguido del payload en formato CSV (`agencia,nombre,apellido,documento,nacimiento,numero`) y finalmente un ACK de 4 bytes en big-endian con el número apostado como confirmación.
+
+Las funciones `readAll()` y `writeAll()` implementadas garantizan lectura y escritura completa de todos los bytes solicitados, evitando los problemas de short read/write. 
+
+El módulo `protocol` encapsula toda la lógica de comunicación de red y la estructura `Bet` define el modelo de dominio para las apuestas.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Configurar las variables de entorno para las apuestas:**
+   Las apuestas se configuran mediante variables de entorno en el `docker-compose-dev.yaml`. Por ejemplo:
+   ```yaml
+   environment:
+     - CLI_ID=1
+     - NOMBRE=Santiago Lionel  
+     - APELLIDO=Lorca
+     - DOCUMENTO=30904465
+     - NACIMIENTO=1999-03-17
+     - NUMERO=7574
+   ```
+
+### Ejercicio 4
+
+Implementé el manejo de señales SIGTERM para realizar un graceful shutdown tanto en el servidor como en el cliente. En el servidor, registré un handler de señal que al recibir SIGTERM cierra el socket del servidor, termina el loop principal y registra los pasos del shutdown. En el cliente, configuré un canal de señales que al recibir SIGTERM invoca un método que cierra el canal de parada (stop), termina el loop de mensajes y cierra la conexión activa, asegurando que todos los file descriptors se cierren correctamente antes de que termine la aplicación principal.
+
+### Ejercicio 3
+
+Implementé validar-echo-server.sh que verifica automáticamente el correcto funcionamiento del servidor echo utilizando Docker y netcat. El script ejecuta un contenedor temporal con la imagen busybox conectado a la misma red Docker (tp0_testing_net) que el servidor, envía el mensaje "hola" usando netcat al puerto 12345, captura la respuesta del servidor y verifica que sea idéntica al mensaje enviado, cumpliendo así con el comportamiento esperado de un echo server. 
+
+### Ejercicio 2
+
+Implementé la inyección de archivos de configuración externos utilizando volúmenes Docker para evitar tener que reconstruir las imágenes cada vez que se modifica la configuración. Para lograr esto, eliminé la copia de archivos de configuración de los Dockerfiles (comentando COPY ./client/config.yaml /config.yaml en el cliente y agregando config.ini al .dockerignore del servidor), y luego configuré el montaje de volúmenes en Docker Compose para mapear los archivos de configuración del host directamente a los contenedores (./server/config.ini:/config.ini para el servidor y ./client/config.yaml:/config.yaml para el cliente), permitiendo así que cualquier cambio en estos archivos sea efectivo inmediatamente al reiniciar los contenedores sin necesidad de reconstruir las imágenes.
+
+### Ejercicio 1
+
+Implementé generar-compose.sh que automatiza la creación de archivos Docker Compose con una cantidad configurable de clientes. El script recibe dos parámetros: el nombre del archivo de salida (como docker-compose-dev.yaml) y la cantidad de clientes deseada, luego utiliza un bucle en bash para generar dinámicamente los servicios cliente con nombres secuenciales (client1, client2, client3, etc.), manteniendo la estructura de red, variables de entorno y dependencias necesarias para que cada cliente pueda comunicarse correctamente con el servidor.
+
+#### Cómo ejecutar el ejercicio
+
+1. **Generar el archivo Docker Compose:**
+   ```bash
+   ./generar-compose.sh NOMBRE-ARCHIVO CANT-CLIENTES
+   ```
+
+   Por ejemplo, si ejecutamos
+   ```bash
+   ./generar-compose.sh docker-compose-dev.yaml 5
+   ```
+   Se genera un archivo `docker-compose-dev.yaml` con 5 clientes (client1, client2, client3, client4, client5).
+
+2. **Levantar el sistema:**
+   ```bash
+   make docker-compose-up
+   ```
+
+4. **Ver los logs:**
+   ```bash
+   make docker-compose-logs
+   ```
+
+5. **Detener el sistema:**
+   ```bash
+   make docker-compose-down
+   ```
+
+####
+---
+
 # TP0: Docker + Comunicaciones + Concurrencia
 
 En el presente repositorio se provee un esqueleto básico de cliente/servidor, en donde todas las dependencias del mismo se encuentran encapsuladas en containers. Los alumnos deberán resolver una guía de ejercicios incrementales, teniendo en cuenta las condiciones de entrega descritas al final de este enunciado.
