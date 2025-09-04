@@ -8,55 +8,165 @@ Los archivos de datos se inyectan en los containers mediante volúmenes Docker, 
 
 El tamaño máximo de cada batch es configurable mediante `batch.maxAmount` en `config.yaml`, optimizado para no exceder 8kB por paquete y mejorar significativamente el throughput del sistema.
 
-Los archivos CSV se procesan mediante **streaming processing** sin cargar completamente en memoria
+Los archivos CSV se procesan mediante streaming processing sin cargar completamente en memoria
 - **Función `countBetsInFile()`:** Primera pasada para contar apuestas totales línea por línea
 - **Función `processBetsInBatches()`:** Segunda pasada que procesa el archivo en pequeños batches
 Solo mantiene en memoria el batch actual (ej: 100 apuestas máx). Los slices se limpian y reutilizan con `batch[:0]` después de cada envío.
 
-**Protocolo de Comunicación por Batches:**
-- Header: 2 bytes en big-endian indicando la longitud total del payload
-- Payload: Múltiples apuestas en formato CSV separadas por `;` 
-  - Formato por apuesta: `agencia,nombre,apellido,documento,nacimiento,numero`
-  - Ejemplo: `1,Juan,Pérez,12345678,1990-01-01,1234;1,Ana,García,87654321,1985-06-15,5678`
-- ACK: 4 bytes en big-endian con el número de la última apuesta procesada o 0xFFFFFFFF en caso de error
-- Una sola conexión TCP por cliente reutilizada para todos los batches
+#### Snippets importantes del código:
 
-#### Cómo ejecutar el ejercicio
+##### Lectura de CSV y Procesamiento por Batches:
+```go
+// client/common/client.go - Procesamiento de CSV línea por línea
+func (c *Client) sendBetsStreaming(betsFile string, totalBets int) error {
+    err := processBetsInBatches(betsFile, c.config.ID, totalBets, c.config.BatchMaxAmount, 
+        func(batch []Bet, batchStart, batchEnd int, isLastBatch bool) error {
+            select {
+            case <-c.stop:
+                return fmt.Errorf("client stopped")
+            default:
+                // Continuar con la ejecución
+            }
 
-1. **Extraer los datos de las agencias:**
+            if err := sendBetBatch(c.conn, batch); err != nil {
+                log.Errorf("action: send_bet_batch | result: fail | client_id: %v | error: %v",
+                    c.config.ID, err)
+                return err
+            }
 
-2. **Configurar el tamaño de batch:**
-   Modificar en `client/config.yaml`:
-   ```yaml
-   batch:
-     maxAmount: 100  # Número máximo de apuestas por batch
-   ```
+            ack, err := receiveAck(c.conn)
+            last := batch[len(batch)-1]
+            if err != nil {
+                if err == io.EOF && isLastBatch {
+                    log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+                    return nil
+                }
+                log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
+                    c.config.ID, err)
+                return err
+            }
 
-3. **Generar el archivo Docker Compose con múltiples clientes:**
-   ```bash
-   ./generar-compose.sh docker-compose-dev.yaml 4
-   ```
+            log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s", last.Documento, last.Numero)
+            return nil
+        })
 
-4. **Levantar el sistema:**
-   ```bash
-   make docker-compose-up
-   ```
+    if err != nil {
+        return err
+    }
 
-5. **Ver los logs para verificar el procesamiento por batches:**
-   ```bash
-   make docker-compose-logs
-   ```
-   
-   Ejemplo
-   ```
-   server | action: apuesta_recibida | result: success | cantidad: 100
-   client1 | action: apuesta_enviada | result: success | dni: 30904465 | numero: 2201
-   ```
+    log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
+    return nil
+}
+```
 
-6. **Detener el sistema:**
-   ```bash
-   make docker-compose-down
-   ```
+##### Procesar archivos sin cargarlos en memoria:
+```go
+// client/common/client.go - Procesamiento en streaming
+func processBetsInBatches(filename string, agencyID string, totalBets int, batchSize int, processor func([]Bet, int, int, bool) error) error {
+    csvFile, err := os.Open(filename)
+    if err != nil {
+        return fmt.Errorf("error opening file: %v", err)
+    }
+    defer csvFile.Close()
+
+    scanner := bufio.NewScanner(csvFile)
+    batch := make([]Bet, 0, batchSize)
+    currentIndex := 0
+
+    for scanner.Scan() {
+        line := scanner.Text()
+        if bet, err := parseBetLine(line, agencyID); err == nil {
+            batch = append(batch, bet)
+
+            // Cuando el batch está lleno o es la última apuesta, procesarlo
+            if len(batch) >= batchSize || currentIndex+len(batch) >= totalBets {
+                batchStart := currentIndex
+                batchEnd := currentIndex + len(batch)
+                isLastBatch := batchEnd >= totalBets
+
+                if err := processor(batch, batchStart, batchEnd, isLastBatch); err != nil {
+                    return err
+                }
+
+                currentIndex = batchEnd
+                batch = batch[:0] // Limpiar el batch reutilizando memoria
+            }
+        } else {
+            log.Warningf("Error parsing line '%s': %v", line, err)
+        }
+    }
+
+    // Procesar último batch si quedó algo
+    if len(batch) > 0 {
+        batchStart := currentIndex
+        batchEnd := currentIndex + len(batch)
+        isLastBatch := true
+
+        if err := processor(batch, batchStart, batchEnd, isLastBatch); err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+```
+
+##### Protocolo:
+```go
+// client/common/protocol.go - Múltiples apuestas separadas por ;
+func sendBetBatch(conn net.Conn, bets []Bet) error {
+    var payloads []string
+    for _, bet := range bets {
+        betPayload := fmt.Sprintf("%s,%s,%s,%s,%s,%s",
+            bet.Agencia,
+            bet.Nombre,
+            bet.Apellido,
+            bet.Documento,
+            bet.Nacimiento,
+            bet.Numero,
+        )
+        payloads = append(payloads, betPayload)
+    }
+
+    payload := strings.Join(payloads, ";")
+    data := []byte(payload)
+    
+    length := uint16(len(data))
+    header := make([]byte, 2)
+    binary.BigEndian.PutUint16(header, length)
+
+    if err := writeAll(conn, header); err != nil {
+        return fmt.Errorf("error sending header: %v", err)
+    }
+
+    if err := writeAll(conn, data); err != nil {
+        return fmt.Errorf("error sending payload: %v", err)
+    }
+
+    return nil
+}
+```
+
+##### Deserialización de apuestas:
+```python
+# server/common/protocol.py - Deserialización de múltiples apuestas
+def parse_bet_batch_text(text: str) -> list[Bet]:
+    bet_strings = text.strip().split(";")
+    bets = []
+    for bet_string in bet_strings:
+        fields = bet_string.strip().split(",")
+        if len(fields) != 6:
+            raise ValueError(f"Expected 6 fields, got {len(fields)}")
+        bets.append(Bet(
+            agency=int(fields[0]),
+            first_name=fields[1],
+            last_name=fields[2],
+            document=fields[3],
+            birthdate=fields[4],
+            number=int(fields[5])
+        ))
+    return bets
+```
 
 ### Ejercicio 5
 
@@ -68,23 +178,214 @@ Las funciones `readAll()` y `writeAll()` implementadas garantizan lectura y escr
 
 El módulo `protocol` encapsula toda la lógica de comunicación de red y la estructura `Bet` define el modelo de dominio para las apuestas.
 
-#### Cómo ejecutar el ejercicio
+#### Snippets del código:
 
-1. **Configurar las variables de entorno para las apuestas:**
-   Las apuestas se configuran mediante variables de entorno en el `docker-compose-dev.yaml`. Por ejemplo:
-   ```yaml
-   environment:
-     - CLI_ID=1
-     - NOMBRE=Santiago Lionel  
-     - APELLIDO=Lorca
-     - DOCUMENTO=30904465
-     - NACIMIENTO=1999-03-17
-     - NUMERO=7574
-   ```
+##### Protocolo de Comunicación - Cliente (Go):
+```go
+// client/common/protocol.go
+func sendBet(conn net.Conn, bet Bet) error {
+    payload := fmt.Sprintf("%s,%s,%s,%s,%s,%s",
+        bet.Agencia,
+        bet.Nombre,
+        bet.Apellido,
+        bet.Documento,
+        bet.Nacimiento,
+        bet.Numero,
+    )
+    data := []byte(payload)
+    length := uint16(len(data))
+
+    header := make([]byte, 2)
+    binary.BigEndian.PutUint16(header, length)
+
+    // Primero enviar header
+    if err := writeAll(conn, header); err != nil {
+        return fmt.Errorf("error sending header: %v", err)
+    }
+
+    // Luego enviar payload
+    if err := writeAll(conn, data); err != nil {
+        return fmt.Errorf("error sending payload: %v", err)
+    }
+
+    return nil
+}
+
+func receiveAck(conn net.Conn) (int, error) {
+    buf := make([]byte, 4)
+    if err := readAll(conn, buf); err != nil {
+        return 0, fmt.Errorf("error reading ACK: %w", err)
+    }
+
+    ackNumber := int(binary.BigEndian.Uint32(buf))
+    return ackNumber, nil
+}
+```
+
+##### Funciones de lectura/escritura completa:
+```go
+// client/common/protocol.go - Evitar short read/write
+func writeAll(conn net.Conn, data []byte) error {
+    totalSent := 0
+    for totalSent < len(data) {
+        n, err := conn.Write(data[totalSent:])
+        if err != nil {
+            return err
+        }
+        totalSent += n
+    }
+    return nil
+}
+
+func readAll(conn net.Conn, buf []byte) error {
+    totalRead := 0
+    for totalRead < len(buf) {
+        n, err := conn.Read(buf[totalRead:])
+        if err != nil {
+            if err == io.EOF && totalRead > 0 {
+                return fmt.Errorf("unexpected EOF, read %d bytes of %d", totalRead, len(buf))
+            }
+            return err
+        }
+        totalRead += n
+    }
+    return nil
+}
+```
+
+##### Protocolo de Comunicación - Servidor (Python):
+```python
+# server/common/protocol.py
+def read_bet(sock: socket.socket) -> Bet:
+    header = _read_bytes(sock, 2)
+    if not header:
+        raise EOFError("Socket closed")
+    
+    length = _unpack_uint16_big_endian(header)
+    data = _read_bytes(sock, length)
+    text = data.decode("utf-8")
+
+    fields = text.strip().split(",")
+    if len(fields) != 6:
+        raise ValueError(f"Expected 6 fields, got {len(fields)}")
+
+    return Bet(
+        agency=int(fields[0]),
+        first_name=fields[1],
+        last_name=fields[2],
+        document=fields[3],
+        birthdate=fields[4],
+        number=int(fields[5])
+    )
+
+def send_ack(sock, bet: Bet):
+    """Envía un ACK de 4 bytes big-endian con el número de la apuesta."""
+    if bet is None:
+        # Usar 0xFFFFFFFF (uint32) como código de error
+        ack_value = 0xFFFFFFFF
+    else:
+        ack_value = bet.number
+    ack = _pack_uint32_big_endian(ack_value)
+    _send_all(sock, ack)
+```
+
+##### Manejo de Apuestas en el Servidor:
+```python
+# server/common/server.py
+def __handle_client_connection(self, client_sock):
+        """
+        Read message from a specific client socket and closes the socket
+
+        If a problem arises in the communication with the client, the
+        client socket will also be closed
+        """
+        try:
+            bet = read_bet(client_sock)
+            store_bets([bet])
+            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
+            send_ack(client_sock, bet)
+        except OSError as e:
+            logging.error(f"action: apuesta_almacenada | result: fail | error: {e}")
+        finally:
+            client_sock.close()
+```
 
 ### Ejercicio 4
 
 Implementé el manejo de señales SIGTERM para realizar un graceful shutdown tanto en el servidor como en el cliente. En el servidor, registré un handler de señal que al recibir SIGTERM cierra el socket del servidor, termina el loop principal y registra los pasos del shutdown. En el cliente, configuré un canal de señales que al recibir SIGTERM invoca un método que cierra el canal de parada (stop), termina el loop de mensajes y cierra la conexión activa, asegurando que todos los file descriptors se cierren correctamente antes de que termine la aplicación principal.
+
+En **server/main.py** `signal.signal(signal.SIGTERM, self.handle_sigterm)` capturar la señal, se modifica `self.running` a false, se dejan de aceptar conexiones y se cierra el socket.
+
+#### Servidor
+```python
+def run(self):
+        """
+        Dummy Server loop
+
+        Server that accept a new connections and establishes a
+        communication with a client. After client with communucation
+        finishes, servers starts to accept new connections again
+        """
+
+        # TODO: Modify this program to handle signal to graceful shutdown
+        # the server
+
+        while self._running:
+            try:
+                client_sock = self.__accept_new_connection()
+            except OSError:
+                break
+            self.__handle_client_connection(client_sock)
+
+    def handle_sigterm(self, signum, frame):
+        """
+        Handle signal to graceful shutdown the server
+        """
+        logging.info('action: shutdown | result: in_progress')
+        self._server_socket.close()
+        self._running = False
+        logging.info('action: shutdown | result: success')
+```
+
+#### Cliente
+```go
+type Client struct {
+	config ClientConfig
+	conn   net.Conn
+	stop   chan struct{}
+}
+func main() {
+   sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		client.StopClientLoop()
+	}()
+
+	client.StartClientLoop()
+}
+
+func (c *Client) StartClientLoop() {
+	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
+		// Create the connection the server in every loop iteration. Send an
+		select {
+		case <-c.stop:
+			return
+		default:
+         // resto del código
+      }
+   }
+
+func (c *Client) StopClientLoop() {
+	close(c.stop)
+	log.Infof("action: stop_client_loop | result: success | client_id: %v", c.config.ID)
+	if c.conn != nil {
+		c.conn.Close()
+		log.Infof("action: close_connection | result: success | client_id: %v", c.config.ID)
+	}
+}
+```
 
 ### Ejercicio 3
 
