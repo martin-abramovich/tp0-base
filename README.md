@@ -2,6 +2,79 @@
 
 Implementé el manejo de señales SIGTERM para realizar un graceful shutdown tanto en el servidor como en el cliente. En el servidor, registré un handler de señal que al recibir SIGTERM cierra el socket del servidor, termina el loop principal y registra los pasos del shutdown. En el cliente, configuré un canal de señales que al recibir SIGTERM invoca un método que cierra el canal de parada (stop), termina el loop de mensajes y cierra la conexión activa, asegurando que todos los file descriptors se cierren correctamente antes de que termine la aplicación principal.
 
+En **server/main.py** `signal.signal(signal.SIGTERM, self.handle_sigterm)` capturar la señal, se modifica `self.running` a false, se dejan de aceptar conexiones y se cierra el socket.
+
+#### Servidor
+```python
+def run(self):
+        """
+        Dummy Server loop
+
+        Server that accept a new connections and establishes a
+        communication with a client. After client with communucation
+        finishes, servers starts to accept new connections again
+        """
+
+        # TODO: Modify this program to handle signal to graceful shutdown
+        # the server
+
+        while self._running:
+            try:
+                client_sock = self.__accept_new_connection()
+            except OSError:
+                break
+            self.__handle_client_connection(client_sock)
+
+    def handle_sigterm(self, signum, frame):
+        """
+        Handle signal to graceful shutdown the server
+        """
+        logging.info('action: shutdown | result: in_progress')
+        self._server_socket.close()
+        self._running = False
+        logging.info('action: shutdown | result: success')
+```
+
+#### Cliente
+```go
+type Client struct {
+	config ClientConfig
+	conn   net.Conn
+	stop   chan struct{}
+}
+func main() {
+   sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		client.StopClientLoop()
+	}()
+
+	client.StartClientLoop()
+}
+
+func (c *Client) StartClientLoop() {
+	for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
+		// Create the connection the server in every loop iteration. Send an
+		select {
+		case <-c.stop:
+			return
+		default:
+         // resto del código
+      }
+   }
+
+func (c *Client) StopClientLoop() {
+	close(c.stop)
+	log.Infof("action: stop_client_loop | result: success | client_id: %v", c.config.ID)
+	if c.conn != nil {
+		c.conn.Close()
+		log.Infof("action: close_connection | result: success | client_id: %v", c.config.ID)
+	}
+}
+```
+
 ### Ejercicio 3
 
 Implementé validar-echo-server.sh que verifica automáticamente el correcto funcionamiento del servidor echo utilizando Docker y netcat. El script ejecuta un contenedor temporal con la imagen busybox conectado a la misma red Docker (tp0_testing_net) que el servidor, envía el mensaje "hola" usando netcat al puerto 12345, captura la respuesta del servidor y verifica que sea idéntica al mensaje enviado, cumpliendo así con el comportamiento esperado de un echo server. 
