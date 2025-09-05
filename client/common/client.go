@@ -31,30 +31,6 @@ type Client struct {
 	stop   chan struct{}
 }
 
-// countBetsInFile cuenta el número total de apuestas válidas sin cargar en memoria
-func countBetsInFile(filename string, agencyID string) (int, error) {
-	csvFile, err := os.Open(filename)
-	if err != nil {
-		return 0, fmt.Errorf("error opening file: %v", err)
-	}
-	defer csvFile.Close()
-
-	count := 0
-	scanner := bufio.NewScanner(csvFile)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if _, err := parseBetLine(line, agencyID); err == nil {
-			count++
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("error reading file: %v", err)
-	}
-
-	return count, nil
-}
 
 // processBetsInBatches procesa las apuestas en batches sin cargar todo el archivo en memoria
 // Mantiene los índices originales para preservar la lógica de BatchMaxAmount y EOF
@@ -74,11 +50,11 @@ func processBetsInBatches(filename string, agencyID string, totalBets int, batch
 		if bet, err := parseBetLine(line, agencyID); err == nil {
 			batch = append(batch, bet)
 
-			// Cuando el batch está lleno o es la última apuesta, procesarlo
-			if len(batch) >= batchSize || currentIndex+len(batch) >= totalBets {
+			// Cuando el batch está lleno, procesarlo
+			if len(batch) >= batchSize {
 				batchStart := currentIndex
 				batchEnd := currentIndex + len(batch)
-				isLastBatch := batchEnd >= totalBets
+				isLastBatch := false // No sabemos si es el último hasta procesar todo
 
 				if err := processor(batch, batchStart, batchEnd, isLastBatch); err != nil {
 					return err
@@ -168,36 +144,6 @@ func (c *Client) StartClientLoop() {
 
 	betsFile := fmt.Sprintf("/agency-%s.csv", c.config.ID)
 	
-	// Primero contar el total de apuestas sin cargar en memoria
-	totalBets, err := countBetsInFile(betsFile, c.config.ID)
-	if err != nil {
-		log.Errorf("action: count_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return
-	}
-
-	if totalBets == 0 {
-		log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
-		// Aún necesitamos notificar finalización y consultar ganadores aunque no haya apuestas
-		if err := c.createClientSocket(); err != nil {
-			return
-		}
-		if err := c.notifyEnd(); err != nil {
-			log.Errorf("action: notify_end | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return
-		}
-		if err := c.requestWinners(); err != nil {
-			log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
-			return
-		}
-		if c.conn != nil {
-			c.conn.Close()
-			c.conn = nil
-		}
-		
-		log.Infof("action: exit | result: success")
-		return
-	}
-
 	if c.config.BatchMaxAmount <= 0 {
 		c.config.BatchMaxAmount = 100 // Default batch size para archivos grandes
 	}
@@ -206,7 +152,7 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	if err := c.sendBetsStreaming(betsFile, totalBets); err != nil {
+	if err := c.sendBetsStreaming(betsFile); err != nil {
 		log.Errorf("action: send_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
 	}
@@ -233,9 +179,9 @@ func (c *Client) StartClientLoop() {
 }
 
 // sendBetsStreaming envía las apuestas en streaming sin cargar todo el archivo en memoria
-func (c *Client) sendBetsStreaming(betsFile string, totalBets int) error {
+func (c *Client) sendBetsStreaming(betsFile string) error {
 	// Procesar las apuestas en streaming manteniendo la lógica original
-	err := processBetsInBatches(betsFile, c.config.ID, totalBets, c.config.BatchMaxAmount, 
+	err := processBetsInBatches(betsFile, c.config.ID, -1, c.config.BatchMaxAmount, 
 		func(batch []Bet, batchStart, batchEnd int, isLastBatch bool) error {
 			select {
 			case <-c.stop:
@@ -253,8 +199,8 @@ func (c *Client) sendBetsStreaming(betsFile string, totalBets int) error {
 			ack, err := receiveAck(c.conn)
 			last := batch[len(batch)-1]
 			if err != nil {
-				// Mantener la lógica original de EOF: solo aceptar EOF si estamos en el último batch
-				if err == io.EOF && isLastBatch {
+				// Si recibimos EOF, significa que el servidor cerró la conexión
+				if err == io.EOF {
 					log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
 					return nil // Esto terminará el procesamiento exitosamente
 				}
@@ -292,47 +238,57 @@ func (c *Client) notifyEnd() error {
 	return nil
 }
 
-// requestWinners consulta ganadores una vez y espera la respuesta del servidor
+// requestWinners consulta ganadores usando polling hasta que estén listos
+// Usa la misma conexión que ya está abierta
 func (c *Client) requestWinners() error {
-	getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
-	if err := sendTextFrame(c.conn, getMsg); err != nil {
-		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return err
-	}
+	maxRetries := 30 // Máximo 30 intentos (30 segundos con 1 segundo de intervalo)
+	retryInterval := 1 * time.Second
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Verificar que la conexión esté abierta
+		if c.conn == nil {
+			return fmt.Errorf("connection is closed")
+		}
 
-	// Leer primera respuesta
-	resp, err := readTextFrame(c.conn)
-	if err != nil {
-		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return err
-	}
+		getMsg := fmt.Sprintf("GET_WINNERS|%s", c.config.ID)
+		if err := sendTextFrame(c.conn, getMsg); err != nil {
+			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return err
+		}
 
-	if resp == "NOT_READY" {
-		// El servidor nos mantendrá la conexión abierta y nos enviará los ganadores cuando esté listo
-		// Esperamos la segunda respuesta con los ganadores
-		resp, err = readTextFrame(c.conn)
+		// Leer respuesta
+		resp, err := readTextFrame(c.conn)
 		if err != nil {
 			log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | error: %v", c.config.ID, err)
 			return err
 		}
-	}
 
-	if strings.HasPrefix(resp, "WINNERS|") {
-		list := strings.TrimPrefix(resp, "WINNERS|")
-		cant := 0
-		if strings.TrimSpace(list) != "" {
-			parts := strings.Split(list, ",")
-			for _, p := range parts {
-				if strings.TrimSpace(p) != "" {
-					cant++
+		if resp == "NOT_READY" {
+			log.Infof("action: consulta_ganadores | result: not_ready | client_id: %v | attempt: %d", c.config.ID, attempt+1)
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		if strings.HasPrefix(resp, "WINNERS|") {
+			list := strings.TrimPrefix(resp, "WINNERS|")
+			cant := 0
+			if strings.TrimSpace(list) != "" {
+				parts := strings.Split(list, ",")
+				for _, p := range parts {
+					if strings.TrimSpace(p) != "" {
+						cant++
+					}
 				}
 			}
+			log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
+			return nil
 		}
-		log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %d", cant)
-		return nil
+
+		log.Errorf("action: consulta_ganadores | result: fail | client_id: %v | unexpected_response: %s", c.config.ID, resp)
+		time.Sleep(retryInterval)
 	}
 
-	return fmt.Errorf("respuesta inesperada: %s", resp)
+	return fmt.Errorf("timeout waiting for winners after %d attempts", maxRetries)
 }
 
 // StopClientLoop Stops the client loop
