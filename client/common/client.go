@@ -264,7 +264,7 @@ func (c *Client) requestWinners() error {
 		}
 
 		if resp == "NOT_READY" {
-			log.Infof("action: consulta_ganadores | result: not_ready | client_id: %v | attempt: %d", c.config.ID, attempt+1)
+			log.Infof("action: consulta_ganadores | result: in_progress | client_id: %v | attempt: %d", c.config.ID, attempt+1)
 			time.Sleep(retryInterval)
 			continue
 		}
