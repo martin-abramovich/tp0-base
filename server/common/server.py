@@ -22,6 +22,7 @@ class Server:
         # Locks para sincronización
         self._state_lock = threading.RLock()  # Para estado del sorteo
         self._executor = None  # Se inicializa en run()
+        self._shutdown_requested = False  # Flag para indicar shutdown a los workers
 
     def run(self):
         """
@@ -55,18 +56,14 @@ class Server:
         """
         logging.info('action: shutdown | result: in_progress')
         
-        # Marcar que el servidor debe detenerse
         self._running = False
+        self._shutdown_requested = True
         
-        # Cerrar socket del servidor para detener accept()
         try:
             self._server_socket.close()
         except:
             pass
-            
-        # No hay conexiones pendientes que cerrar con el nuevo protocolo
         
-        # Notificar al executor que debe hacer shutdown
         if self._executor:
             logging.info('action: shutting_down_executor | result: in_progress')
             self._executor.shutdown(wait=True)
@@ -82,7 +79,7 @@ class Server:
         client socket will also be closed
         """
         try:
-            while True:
+            while not self._shutdown_requested:
                 try:
                     text = read_frame_text(client_sock)
                 except ConnectionError:
@@ -97,9 +94,18 @@ class Server:
                     bets = None
 
                 if bets is not None and len(bets) > 0:
+                    # Verificar shutdown antes de procesar apuestas
+                    if self._shutdown_requested:
+                        logging.info('action: worker_shutdown | result: success | reason: shutdown_requested_during_bet_processing')
+                        break
+                    
                     success = True
 
                     for bet in bets:
+                        # Verificar shutdown antes de cada apuesta
+                        if self._shutdown_requested:
+                            logging.info('action: worker_shutdown | result: success | reason: shutdown_requested_during_bet_storage')
+                            break
                         try:
                             storage.store_bets([bet])
                         except Exception as e:
@@ -107,7 +113,7 @@ class Server:
                             success = False
                             break
 
-                    if success:
+                    if success and not self._shutdown_requested:
                         logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
                         send_ack(client_sock, bets[-1])
                     else:
@@ -117,6 +123,11 @@ class Server:
 
                 # Comandos
                 if text.startswith('END|'):
+                    # Verificar shutdown antes de procesar comando END
+                    if self._shutdown_requested:
+                        logging.info('action: worker_shutdown | result: success | reason: shutdown_requested_during_end_processing')
+                        break
+                    
                     try:
                         agency_id = int(text.split('|', 1)[1])
                         with self._state_lock:
@@ -130,6 +141,11 @@ class Server:
                     continue
 
                 if text.startswith('GET_WINNERS|'):
+                    # Verificar shutdown antes de procesar comando GET_WINNERS
+                    if self._shutdown_requested:
+                        logging.info('action: worker_shutdown | result: success | reason: shutdown_requested_during_winners_processing')
+                        break
+                    
                     try:
                         agency_id = int(text.split('|', 1)[1])
                     except Exception:
@@ -157,6 +173,9 @@ class Server:
         except Exception as e:
             logging.error(f"action: connection_error | result: fail | error: {e}")
         finally:
+            # Log si termina por shutdown
+            if self._shutdown_requested:
+                logging.info('action: worker_shutdown | result: success')
             # Cerrar conexión siempre
             try:
                 client_sock.close()

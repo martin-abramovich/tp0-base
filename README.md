@@ -1,3 +1,13 @@
+### Correcciones
+
+Se realizaron las siguientes correcciones de implementación:
+
+1. **Eliminación de la función `countBetsInFile`**: Se removió la función `countBetsInFile` del archivo `client.go` ya que no agregaba valor. Se simplificó la función `StartClientLoop` para que no requiera contar las apuestas previamente.
+
+2. **Corrección del manejo de SIGTERM**: Se corrigió el manejo de SIGTERM para que notifique correctamente a los workers del `ThreadPoolExecutor` y realice un graceful shutdown. 
+
+3. **Reemplazo de conexiones pendientes por protocolo de sincronización**: Se eliminó completamente el sistema de conexiones pendientes (`_pending_winners_requests`) y se implementó un protocolo de polling. El cliente hace polling periódico hasta que los ganadores estén listos.
+
 ### Ejercicio 8
 
 Implementé que el servidor ahora maneje conexiones y procese mensajes en paralelo utilizando multithreading. Implementé un `ThreadPoolExecutor` con hasta 20 workers que permite atender múltiples clientes simultáneamente. La arquitectura funciona con un thread principal que acepta nuevas conexiones mientras que los threads workers del pool se encargan de procesar los mensajes de cada cliente de forma independiente y paralela ejecutando `handle_client_connection`.

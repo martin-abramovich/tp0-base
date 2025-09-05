@@ -54,7 +54,7 @@ func processBetsInBatches(filename string, agencyID string, totalBets int, batch
 			if len(batch) >= batchSize {
 				batchStart := currentIndex
 				batchEnd := currentIndex + len(batch)
-				isLastBatch := false // No sabemos si es el último hasta procesar todo
+				isLastBatch := false
 
 				if err := processor(batch, batchStart, batchEnd, isLastBatch); err != nil {
 					return err
@@ -162,25 +162,21 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	// Consultar ganadores (manteniendo la misma conexión)
 	if err := c.requestWinners(); err != nil {
 		log.Errorf("action: request_winners | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return
 	}
 
-	// Cerrar conexión después de obtener ganadores
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
 	}
 
-	// Log de finalización explícito para que los tests detecten el evento de salida
 	log.Infof("action: exit | result: success")
 }
 
 // sendBetsStreaming envía las apuestas en streaming sin cargar todo el archivo en memoria
 func (c *Client) sendBetsStreaming(betsFile string) error {
-	// Procesar las apuestas en streaming manteniendo la lógica original
 	err := processBetsInBatches(betsFile, c.config.ID, -1, c.config.BatchMaxAmount, 
 		func(batch []Bet, batchStart, batchEnd int, isLastBatch bool) error {
 			select {
@@ -199,10 +195,9 @@ func (c *Client) sendBetsStreaming(betsFile string) error {
 			ack, err := receiveAck(c.conn)
 			last := batch[len(batch)-1]
 			if err != nil {
-				// Si recibimos EOF, significa que el servidor cerró la conexión
 				if err == io.EOF {
 					log.Infof("action: apuestas_enviadas | result: success | client_id: %v", c.config.ID)
-					return nil // Esto terminará el procesamiento exitosamente
+					return nil
 				}
 				log.Errorf("action: receive_ack | result: fail | client_id: %v | error: %v",
 					c.config.ID, err)
@@ -245,7 +240,6 @@ func (c *Client) requestWinners() error {
 	retryInterval := 1 * time.Second
 	
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Verificar que la conexión esté abierta
 		if c.conn == nil {
 			return fmt.Errorf("connection is closed")
 		}
